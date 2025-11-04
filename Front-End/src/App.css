@@ -1,0 +1,52 @@
+/* Root container: centers the app and sets layout boundaries */
+#root {
+  max-width: 1280px;      /* Limits content width for readability */
+  margin: 0 auto;         /* Centers content horizontally */
+  padding: 2rem;          /* Adds space inside the container */
+  text-align: center;     /* Centers all text inside */
+}
+
+/* Logo styling */
+.logo {
+  height: 6em;                   /* Fixed logo height */
+  padding: 1.5em;                /* Inner spacing */
+  will-change: filter;           /* Optimizes performance for hover effects */
+  transition: filter 300ms;      /* Smooth transition for filter effects */
+}
+
+/* Default hover glow */
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+
+/* React-specific hover glow (blue tint) */
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+/* Logo spin animation definition */
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);     /* Start rotation */
+  }
+  to {
+    transform: rotate(360deg);   /* Full rotation */
+  }
+}
+
+/* Apply spinning animation only when user allows motion */
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;  /* Infinite 20s rotation */
+  }
+}
+
+/* Card section: used for grouped content areas */
+.card {
+  padding: 2em;    /* Consistent spacing for card components */
+}
+
+/* Secondary text styling (muted color) */
+.read-the-docs {
+  color: #888;     /* Gray color for less emphasis */
+}
