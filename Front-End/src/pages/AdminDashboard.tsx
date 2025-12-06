@@ -2,32 +2,48 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { UserManagementDialog } from "@/components/dialogs/UserManagementDialog";
-import { ManageClassDialog } from "@/components/dialogs/ManageClassDialog";
-import { DashboardNavbar } from "@/components/DashboardNavbar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { UniversalSidebar } from "@/components/UniversalSidebar";
+import { UserManagementDialog } from "@/components/Admin-Dashboard/UserManagementDialog";
+import { ManageClassDialog } from "@/components/Admin-Dashboard/ManageClassDialog";
+import { SendMessageDialog } from "@/components/Admin-Dashboard/SendMessageDialog";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Download, Search, Filter, Shield } from "lucide-react";
+import { 
+  Plus, 
+  Download, 
+  Search, 
+  Filter, 
+  Shield, 
+  LayoutDashboard, 
+  Users, 
+  BookOpen, 
+  BarChart3,
+  UserCheck,
+  ClipboardCheck,
+  Bell,
+  FileText,
+  MessageCircle
+} from "lucide-react";
+import { apiClient } from "@/lib/api";
 
 // Import components
-import OverviewTab from "@/components/Admin-Dashboard/OverviewTab";
 import UsersTab from "@/components/Admin-Dashboard/UsersTab";
 import ClassesTab from "@/components/Admin-Dashboard/ClassesTab";
 import AnalyticsTab from "@/components/Admin-Dashboard/AnalyticsTab";
+import AdminOverview from "@/components/Admin-Dashboard/AdminOverview";
+import TutorOnboardingTab from "@/components/Admin-Dashboard/TutorOnboardingTab";
+import ReportingTab from "@/components/Admin-Dashboard/ReportingTab";
+import CommunicationTab from "@/components/Admin-Dashboard/CommunicationTab";
+import AttendanceTrackingTab from "@/components/Admin-Dashboard/AttendanceTrackingTab";
+import CreateClassDialog from "@/components/Admin-Dashboard/CreateClassDialog";
 
-// Import data (for fallback)
-import { systemStats, recentUsers, popularClasses, platformAnalytics, recentActivities } from "@/data/admin-data";
-
-interface User {
-  id: number;
+// Types matching your backend responses
+interface Admin {
   name: string;
   email: string;
-  role: 'student' | 'tutor' | 'admin';
-  created_at: string;
-  student?: any;
-  tutor?: any;
+  role: string;
 }
 
 interface SystemStats {
@@ -35,254 +51,776 @@ interface SystemStats {
   total_students: number;
   total_tutors: number;
   pending_verifications: number;
+  pending_reports: number;
+  total_classes: number;
+  recent_attendance_count: number;
 }
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  avatar: string;
+  lastActive: string;
+  joinDate: string;
+  classes: number;
+}
+
+interface PendingTutor {
+  id: number;
+  user_id: number;
+  name: string;
+  email: string;
+  qualification: string;
+  experience_years: number;
+  subjects: string[];
+  submitted_at: string;
+}
+
+interface PendingReport {
+  id: number;
+  session_id: number;
+  tutor_name: string;
+  session_title: string;
+  session_date: string;
+  students_present: number;
+  total_students: number;
+  submitted_at: string;
+}
+
+interface RecentActivity {
+  id: number;
+  user: string;
+  action: string;
+  time: string;
+  type: string;
+}
+
+interface DashboardData {
+  admin: Admin;
+  stats: SystemStats;
+  recent_activities: RecentActivity[];
+  users: User[];
+  pending_tutors: PendingTutor[];
+  pending_reports: PendingReport[];
+  classes?: any[];
+}
+
+// Admin-specific navigation items
+const adminNavigationItems = [
+  { title: "Overview", value: "overview", icon: LayoutDashboard },
+  { title: "User Management", value: "users", icon: Users },
+  { title: "Tutor Onboarding", value: "tutor-onboarding", icon: UserCheck },
+  { title: "Class Management", value: "classes", icon: BookOpen },
+  { title: "Reporting", value: "reporting", icon: ClipboardCheck },
+  { title: "Communication", value: "communication", icon: Bell },
+  { title: "Attendance Tracking", value: "attendance", icon: FileText },
+  { title: "Analytics", value: "analytics", icon: BarChart3 },
+];
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { logout, user } = useAuth();
   const { toast } = useToast();
+  
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [selectedClass, setSelectedClass] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showCommunication, setShowCommunication] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showSendMessageDialog, setShowSendMessageDialog] = useState(false);
+  const [selectedUserForMessage, setSelectedUserForMessage] = useState<User | null>(null);
+  const [pendingTutors, setPendingTutors] = useState<PendingTutor[]>([]);
+  const [showCreateClass, setShowCreateClass] = useState(false);
+
+  // In your AdminDashboard.tsx, update the data fetching functions:
+
+const fetchDashboardData = async () => {
+  try {
+    setLoading(true);
+    const response = await apiClient.get("/admin/dashboard");
+    const data = response.data;
+
+    if (data.success) {
+      // Map users data to match UsersTab expectations
+      const mappedUsers = (data.users || []).map((user: any) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status || 'active',
+        avatar: user.avatar || user.profile_photo || '',
+        lastActive: user.last_login_at || user.last_active || new Date().toISOString().split('T')[0],
+        joinDate: new Date(user.created_at).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }),
+        classes: user.enrollments_count || user.tutorials_count || 0
+      }));
+
+      setDashboardData({
+        admin: {
+          name: user?.name || "Administrator",
+          email: user?.email || "",
+          role: user?.role || "admin"
+        },
+        stats: data.stats || {
+          total_users: 0,
+          total_students: 0,
+          total_tutors: 0,
+          pending_verifications: 0,
+          pending_reports: 0,
+          total_classes: 0,
+          recent_attendance_count: 0
+        },
+        recent_activities: data.recent_activities || [],
+        users: mappedUsers,
+        pending_tutors: data.pending_tutors || [],
+        pending_reports: data.pending_reports || [],
+        classes: data.classes || [] // Add classes data if available
+      });
+    } else {
+      throw new Error(data.message || "Failed to load dashboard");
+    }
+  } catch (error: any) {
+    console.error("Admin dashboard error:", error);
+    toast({
+      title: "Error",
+      description: error.response?.data?.message || "Failed to load admin dashboard.",
+      variant: "destructive",
+    });
+
+    if (error.response?.status === 401) {
+      logout();
+      navigate("/login?redirect=/admin");
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Update fetchTabData to handle all tabs
+const fetchTabData = async (tab: string) => {
+  try {
+    switch (tab) {
+      case "users": {
+        const usersResponse = await apiClient.get("/admin/users");
+        if (usersResponse.data.success && dashboardData) {
+          const mappedUsers = (usersResponse.data.users || []).map((user: any) => ({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            status: user.status || 'active',
+            avatar: user.avatar || user.profile_photo || '',
+            lastActive: user.last_login_at || user.last_active || new Date().toISOString().split('T')[0],
+            joinDate: new Date(user.created_at).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            }),
+            classes: user.enrollments_count || user.tutorials_count || 0
+          }));
+          
+          setDashboardData(prev => prev ? {
+            ...prev,
+            users: mappedUsers
+          } : null);
+        }
+        break;
+      }
+      
+      case "tutor-onboarding": {
+        const tutorsResponse = await apiClient.get("/admin/pending-tutors");
+        if (tutorsResponse.data.success && dashboardData) {
+          setDashboardData(prev => prev ? {
+            ...prev,
+            pending_tutors: tutorsResponse.data.tutors || []
+          } : null);
+        }
+        break;
+      }
+      
+      case "reporting": {
+        const reportsResponse = await apiClient.get("/admin/pending-reports");
+        if (reportsResponse.data.success && dashboardData) {
+          setDashboardData(prev => prev ? {
+            ...prev,
+            pending_reports: reportsResponse.data.reports || []
+          } : null);
+        }
+        break;
+      }
+
+      // In AdminDashboard.tsx, update the fetchTabData function for classes:
+
+case "classes": {
+  const classesResponse = await apiClient.get("/admin/classes");
+  if (classesResponse.data.success && dashboardData) {
+    const mappedClasses = (classesResponse.data.classes || []).map((classItem: any) => ({
+      id: classItem.id,
+      title: classItem.title,
+      name: classItem.title, // For compatibility
+      description: classItem.description || '',
+      tutor: classItem.tutor || 'Unknown Tutor',
+      tutor_details: classItem.tutor_details,
+      students: classItem.students || 0,
+      max_capacity: classItem.max_capacity || 30,
+      rating: classItem.rating || 0,
+      subject: classItem.subject || 'General',
+      category: classItem.category,
+      color: classItem.color || `bg-blue-500`,
+      enrollmentCode: classItem.enrollmentCode || `CLASS-${classItem.id}`,
+      assignments: classItem.assignments || 0,
+      active: classItem.active !== false,
+      completionRate: classItem.completionRate || 0,
+      duration: classItem.duration || '0 hours',
+      level: classItem.level || 'Beginner',
+      price: classItem.price || 0,
+      created_at: classItem.created_at,
+      updated_at: classItem.updated_at
+    }));
+    
+    setDashboardData(prev => prev ? {
+      ...prev,
+      classes: mappedClasses
+    } : null);
+  }
+  break;
+}
+
+      case "attendance": {
+        const attendanceResponse = await apiClient.get("/admin/attendance/stats");
+        // You can handle attendance data here if needed
+        break;
+      }
+    }
+  } catch (error: any) {
+    console.error(`Error fetching ${tab} data:`, error);
+    toast({
+      title: "Error",
+      description: `Failed to load ${tab} data.`,
+      variant: "destructive",
+    });
+  }
+};
+
+const openSendMessageDialog = (user?: User) => {
+    setSelectedUserForMessage(user || null);
+    setShowSendMessageDialog(true);
+  };
   
-  // Real data from backend
-  const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  // Function to close dialog
+  const closeSendMessageDialog = () => {
+    setShowSendMessageDialog(false);
+    setSelectedUserForMessage(null);
+  };
+
+const handleFilterClick = () => {
+    setShowFilters(!showFilters);
+    toast({
+      title: "Filters",
+      description: showFilters ? "Filters hidden" : "Filters expanded",
+    });
+  };
 
   useEffect(() => {
-    const fetchAdminData = async () => {
-      try {
-        const token = localStorage.getItem('auth_token');
+    fetchDashboardData();
+  }, []);
 
-        const statsResponse = await fetch('http://192.168.1.3:8000/api/admin/dashboard', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        });
-        
-        // Fetch users data
-        const usersResponse = await fetch('http://localhost:8000/api/admin/users', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        });
-
-        if (usersResponse.ok && statsResponse.ok) {
-          const statsData = await statsResponse.json();
-          const usersData = await usersResponse.json();
-          setUsers(usersData.users || []);
-          
-          // Calculate real stats from users data
-          const realStats: SystemStats = {
-            total_users: usersData.users.length,
-            total_students: usersData.users.filter((u: User) => u.role === 'student').length,
-            total_tutors: usersData.users.filter((u: User) => u.role === 'tutor').length,
-            pending_verifications: usersData.users.filter((u: User) => 
-              u.role === 'tutor' && u.tutor && !u.tutor.is_verified
-            ).length
-          };
-          
-          setSystemStats(realStats);
-          
-          // Generate recent activities from users
-          const activities = usersData.users
-            .slice(0, 5)
-            .map((user: User) => ({
-              id: user.id,
-              user: user.name,
-              action: `Registered as ${user.role}`,
-              time: new Date(user.created_at).toLocaleDateString(),
-              type: user.role === 'student' ? 'student' : 
-                    user.role === 'tutor' ? 'tutor' : 'admin'
-            }));
-          setRecentActivities(activities);
-          
-        } else {
-          throw new Error('Failed to fetch admin data');
-        }
-      } catch (error) {
-        console.error('Error fetching admin data:', error);
-        toast({
-          title: "Error",
-          description: "Failed to load admin dashboard data",
-          variant: "destructive"
-        });
-        
-        // Fallback to mock data if API fails
-        setSystemStats({
-          total_users: recentUsers.length,
-          total_students: recentUsers.filter(u => u.role === 'student').length,
-          total_tutors: recentUsers.filter(u => u.role === 'tutor').length,
-          pending_verifications: recentUsers.filter(u => u.role === 'tutor' && u.status === 'pending').length
-        });
-        setUsers(recentUsers);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (user && user.role === 'admin') {
-      fetchAdminData();
+  useEffect(() => {
+    if (dashboardData && activeTab !== "overview") {
+      fetchTabData(activeTab);
     }
-  }, [user, toast]);
+  }, [activeTab]);
 
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
 
-  const handleExportReports = async () => {
+  const handleApproveTutor = async (tutorId: number) => {
     try {
-      const token = localStorage.getItem('auth_token');
-      // You can implement export functionality here
+      await apiClient.post(`/admin/tutors/${tutorId}/approve`);
       toast({
-        title: "Export Started",
-        description: "Your reports are being prepared for download.",
+        title: "Tutor Approved",
+        description: "Tutor account has been verified and activated.",
       });
-    } catch (error) {
+      // Refresh data
+      fetchTabData("tutor-onboarding");
+    } catch (error: any) {
       toast({
-        title: "Export Failed",
-        description: "Failed to generate reports.",
+        title: "Approval Failed",
+        description: error.response?.data?.message || "Failed to approve tutor",
         variant: "destructive"
       });
     }
   };
 
+  const fetchPendingTutors = async () => {
+  try {
+    // Fetch tutors with pending applications
+    const response = await apiClient.get('/admin/tutor-approvals/pending');
+    
+    // Also fetch tutors with pending degree verification
+    const degreeResponse = await apiClient.get('/admin/tutor-approvals/pending-degree');
+    
+    // Combine and deduplicate
+    const allTutors = [...response.data.tutors, ...degreeResponse.data.tutors];
+    const uniqueTutors = Array.from(new Map(allTutors.map(t => [t.id, t])).values());
+    
+    setPendingTutors(uniqueTutors);
+  } catch (error) {
+    console.error('Error fetching tutors:', error);
+  }
+};
+
+  const handleRejectTutor = async (tutorId: number, rejectionReason: string) => {
+  try {
+    await apiClient.post(`/admin/tutors/${tutorId}/reject`, {
+      rejection_reason: rejectionReason
+    });
+    toast({
+      title: "Tutor Rejected",
+      description: "Tutor application has been rejected and notification sent.",
+    });
+    // Refresh data
+    fetchTabData("tutor-onboarding");
+  } catch (error: any) {
+    toast({
+      title: "Rejection Failed",
+      description: error.response?.data?.message || "Failed to reject tutor",
+      variant: "destructive"
+    });
+  }
+};
+
+  const handleApproveReport = async (reportId: number) => {
+    try {
+      await apiClient.post(`/admin/reports/${reportId}/approve`);
+      toast({
+        title: "Report Approved",
+        description: "Session report has been approved.",
+      });
+      // Refresh data
+      fetchTabData("reporting");
+    } catch (error: any) {
+      toast({
+        title: "Approval Failed",
+        description: error.response?.data?.message || "Failed to approve report",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleSendNotification = async (data: {
+    target: 'all' | 'students' | 'tutors';
+    title: string;
+    message: string;
+  }) => {
+    try {
+      await apiClient.post("/admin/notifications", data);
+      toast({
+        title: "Notification Sent",
+        description: "Your message has been sent successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Send Failed",
+        description: error.response?.data?.message || "Failed to send notification",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleExportReports = async () => {
+    try {
+      toast({
+        title: "Export Started",
+        description: "Your reports are being prepared for download.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export Failed",
+        description: error.response?.data?.message || "Failed to generate reports.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleViewProfile = () => {
+    // Navigate to admin profile page when created
+    toast({
+      title: "Profile",
+      description: "Admin profile page coming soon.",
+    });
+  };
+
+  // Check if current tab should show search (not overview)
+  const shouldShowSearch = activeTab !== "overview";
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading admin dashboard...</div>
-      </div>
+      <SidebarProvider>
+        <div className="min-h-screen bg-background flex w-full overflow-x-hidden">
+          <UniversalSidebar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onLogout={handleLogout}
+            navigationItems={adminNavigationItems}
+            userRole="admin"
+            userName={user?.name}
+          />
+          <div className="flex-1 flex items-center justify-center w-full overflow-x-hidden">
+            <div className="text-center text-lg text-foreground">Loading admin dashboard...</div>
+          </div>
+        </div>
+      </SidebarProvider>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardNavbar userRole="admin" onLogout={handleLogout} />
-
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <p className="text-gray-600">Monitor and manage your entire learning platform</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={handleExportReports}>
-                <Download className="w-4 h-4 mr-2" />
-                Export Reports
-              </Button>
-              <Button onClick={() => setShowUserManagement(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add User
-              </Button>
-              <div className="flex items-center gap-2 px-3 py-1 bg-purple-100 text-purple-800 rounded-full">
-                <Shield className="w-4 h-4" />
-                <span className="text-sm font-medium">Administrator</span>
-              </div>
+  if (!dashboardData) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen bg-background flex w-full overflow-x-hidden">
+          <UniversalSidebar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onLogout={handleLogout}
+            navigationItems={adminNavigationItems}
+            userRole="admin"
+            userName={user?.name}
+          />
+          <div className="flex-1 flex items-center justify-center w-full overflow-x-hidden">
+            <div className="text-center bg-card rounded-lg border border-border p-8">
+              <h2 className="text-xl font-semibold mb-4 text-foreground">
+                Unable to load admin dashboard
+              </h2>
+              <Button onClick={fetchDashboardData}>Retry</Button>
             </div>
           </div>
         </div>
-      </div>
+      </SidebarProvider>
+    );
+  }
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="flex justify-between items-center mb-6">
-            <TabsList className="grid w-full md:w-auto grid-cols-4">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="users">Users</TabsTrigger>
-              <TabsTrigger value="classes">Classes</TabsTrigger>
-              <TabsTrigger value="analytics">Analytics</TabsTrigger>
-            </TabsList>
-            
-            <SearchBar 
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-            />
+  const { admin, stats, recent_activities, users, pending_tutors, pending_reports } = dashboardData;
+
+  return (
+    <SidebarProvider>
+      <div className="min-h-screen bg-background text-foreground flex w-full overflow-x-hidden">
+        {/* Sidebar */}
+        <UniversalSidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onLogout={handleLogout}
+          onOpenMessages={() => setShowCommunication(true)}
+          navigationItems={adminNavigationItems}
+          userRole="admin"
+          userName={admin.name}
+        />
+
+        {/* Main content */}
+        <div className="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
+          {/* Header */}
+          <div className="bg-card border-b border-border px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full max-w-full">
+            <div className="flex items-center gap-4 w-full sm:w-auto">
+              <SidebarTrigger />
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">
+                  {activeTab === "overview" ? "Admin Dashboard" : 
+                   activeTab === "tutor-onboarding" ? "Tutor Onboarding" :
+                   activeTab === "communication" ? "Communication Center" :
+                   activeTab === "attendance" ? "Attendance Tracking" :
+                   activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                </h1>
+                <p className="text-sm sm:text-base text-muted-foreground truncate">
+                  {activeTab === "overview" 
+                    ? "Monitor and manage your entire learning platform"
+                    : activeTab === "tutor-onboarding"
+                    ? "Review and approve tutor applications"
+                    : activeTab === "communication"
+                    ? "Send notifications to students and tutors"
+                    : activeTab === "attendance"
+                    ? "Monitor and verify attendance records"
+                    : `Managing ${activeTab}.`}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-start sm:justify-end">
+              <Button variant="outline" size="sm" onClick={handleExportReports} className="flex-1 sm:flex-none bg-card hover:bg-accent">
+                <Download className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Export</span>
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => openSendMessageDialog()}  className="flex-1 sm:flex-none bg-card hover:bg-accent">
+                <MessageCircle className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Messages</span>
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleViewProfile} className="flex-1 sm:flex-none bg-card hover:bg-accent">
+                <Shield className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Profile</span>
+              </Button>
+              {activeTab === "users" && (
+                <Button onClick={() => setShowUserManagement(true)} className="flex-1 sm:flex-none">
+                  <Plus className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Add User</span>
+                </Button>
+              )}
+            </div>
           </div>
 
-          <TabsContent value="overview">
-            <OverviewTab 
-              systemStats={systemStats || {
-                total_users: 0,
-                total_students: 0,
-                total_tutors: 0,
-                pending_verifications: 0
-              }}
-              recentActivities={recentActivities}
-              platformAnalytics={platformAnalytics}
-              onUserManagement={() => setShowUserManagement(true)}
-            />
-          </TabsContent>
+          {/* Content Area */}
+          <main className="flex-1 px-4 sm:px-6 py-4 sm:py-8 overflow-auto w-full max-w-full bg-background">
+            {/* Search Bar - Show on relevant pages */}
+            {shouldShowSearch && ["users", "classes", "attendance", "reporting"].includes(activeTab) && (
+              <div className="mb-6 flex justify-end w-full max-w-full">
+                <SearchBar 
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  onFilterClick={handleFilterClick}
+                />
+              </div>
+            )}
 
-          <TabsContent value="users">
-            <UsersTab 
-              users={users}
-              onAddUser={() => setShowUserManagement(true)}
-              searchQuery={searchQuery}
-            />
-          </TabsContent>
+            {/* Filter Panel - Show when filters are expanded */}
+          {showFilters && shouldShowSearch && (
+            <div className="mb-6 p-4 border rounded-lg bg-accent/50 border-border">
+              <div className="flex flex-col sm:flex-row gap-6">
+                {/* Role Filter */}
+                <div className="flex-1">
+                  <h4 className="text-sm font-medium text-foreground mb-3">Filter by Role</h4>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      All Roles
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      Admin
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      Tutor
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      Student
+                    </Button>
+                  </div>
+                </div>
 
-          <TabsContent value="classes">
-            <ClassesTab 
-              classes={popularClasses}
-              onSelectClass={setSelectedClass}
-            />
-          </TabsContent>
+                {/* Status Filter */}
+                <div className="flex-1">
+                  <h4 className="text-sm font-medium text-foreground mb-3">Filter by Status</h4>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      All Status
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border"
+                    >
+                      Active
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-card hover:bg-accent border-border text-red-600 border-red-200 hover:bg-red-50"
+                    >
+                      Suspended
+                    </Button>
+                  </div>
+                </div>
+              </div>
 
-          <TabsContent value="analytics">
-            <AnalyticsTab analytics={platformAnalytics} />
-          </TabsContent>
-        </Tabs>
-      </main>
+              {/* Filter Actions */}
+              <div className="flex items-center justify-between pt-3 border-t border-border mt-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Active filters: None</span>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setShowFilters(false)}
+                    className="text-xs h-7 hover:bg-accent"
+                  >
+                    Hide filters
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => {
+                      // Clear filters logic here
+                      setShowFilters(false);
+                    }}
+                    className="text-xs h-7 hover:bg-accent"
+                  >
+                    Clear all
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
-      <UserManagementDialog
-        open={showUserManagement}
-        onOpenChange={setShowUserManagement}
-      />
+            {/* Tab Content */}
+            <div className="w-full max-w-full min-w-0 overflow-x-hidden">
+              {activeTab === "overview" && (
+                <AdminOverview
+                  systemStats={stats}
+                  recentActivities={recent_activities}
+                  platformAnalytics={[]}
+                  onUserManagement={() => setShowUserManagement(true)}
+                  onViewUsers={() => setActiveTab("users")}
+                  onViewClasses={() => setActiveTab("classes")}
+                  onViewTutorOnboarding={() => setActiveTab("tutor-onboarding")}
+                  onViewReporting={() => setActiveTab("reporting")}
+                  onSendNotification={() => setActiveTab("communication")}
+                  onViewAttendance={() => setActiveTab("attendance")}
+                />
+              )}
 
-      <ManageClassDialog
-        open={!!selectedClass}
-        onOpenChange={(open) => !open && setSelectedClass(null)}
-        classData={selectedClass || {
-          name: "",
-          tutor: "",
-          students: 0,
-          rating: 0,
-          subject: "",
-          color: "",
-          enrollmentCode: "",
-          assignments: 0,
-          active: true,
-          completionRate: 0
-        }}
-      />
-    </div>
+              {activeTab === "users" && (
+                <UsersTab 
+                  users={users}
+                  onAddUser={() => setShowUserManagement(true)}
+                  searchQuery={searchQuery}
+                  onRefresh={() => fetchTabData("users")}
+                />
+              )}
+
+              {activeTab === "tutor-onboarding" && (
+                <TutorOnboardingTab
+                  pendingTutors={pending_tutors}
+                  onApproveTutor={handleApproveTutor}
+                  onRejectTutor={handleRejectTutor}
+                  onRefresh={() => fetchTabData("tutor-onboarding")}
+                  showDegreeVerification={true}
+                />
+              )}
+
+              {activeTab === "classes" && (
+                <ClassesTab 
+                  classes={dashboardData.classes || []}
+                  onSelectClass={setSelectedClass}
+                  searchQuery={searchQuery}
+                  onRefresh={() => fetchTabData("classes")}
+                  onCreateClass={() => setShowCreateClass(true)}
+                />
+              )}
+
+              {activeTab === "reporting" && (
+                <ReportingTab
+                  pendingReports={pending_reports}
+                  onApproveReport={handleApproveReport}
+                  searchQuery={searchQuery}
+                  onRefresh={() => fetchTabData("reporting")}
+                />
+              )}
+
+              {activeTab === "communication" && (
+                <CommunicationTab
+                  onSendNotification={handleSendNotification}
+                />
+              )}
+
+              {activeTab === "attendance" && (
+                <AttendanceTrackingTab
+                  searchQuery={searchQuery}
+                  onRefresh={() => fetchDashboardData()}
+                />
+              )}
+
+              {activeTab === "analytics" && (
+                <AnalyticsTab analytics={[]} /> // You can add analytics data later
+              )}
+            </div>
+          </main>
+        </div>
+
+        {/* Dialogs */}
+        <UserManagementDialog
+          open={showUserManagement}
+          onOpenChange={setShowUserManagement}
+          onUserCreated={() => fetchTabData("users")}
+        />
+
+        <ManageClassDialog
+          open={!!selectedClass}
+          onOpenChange={(open) => !open && setSelectedClass(null)}
+          classData={selectedClass}
+          onClassUpdated={() => fetchTabData("classes")}
+        />
+
+        <CreateClassDialog
+          open={showCreateClass}
+          onOpenChange={setShowCreateClass}
+          onClassCreated={() => {
+            fetchTabData("classes");
+            toast({
+              title: "Success",
+              description: "Class created successfully!",
+            });
+          }}
+        />
+
+        {/* Add the dialog component */}
+        <SendMessageDialog
+          open={showSendMessageDialog}
+          onOpenChange={closeSendMessageDialog}
+          user={selectedUserForMessage}
+        />
+      </div>
+    </SidebarProvider>
   );
 }
 
-function SearchBar({ searchQuery, setSearchQuery }: { 
+function SearchBar({ 
+  searchQuery, 
+  setSearchQuery
+}: { 
   searchQuery: string; 
   setSearchQuery: (query: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative hidden md:block">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+    <div className="flex items-center gap-2 w-full sm:w-auto">
+      <div className="relative w-full sm:w-64">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
         <Input
           placeholder="Search users, classes..."
-          className="pl-10 w-64"
+          className="pl-10 w-full bg-card border-border text-foreground placeholder:text-muted-foreground"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
       </div>
-      <Button variant="outline" size="icon">
+      <Button 
+        variant="outline" 
+        size="icon" 
+        className="shrink-0 bg-card hover:bg-accent border-border"
+      >
         <Filter className="w-4 h-4" />
       </Button>
     </div>

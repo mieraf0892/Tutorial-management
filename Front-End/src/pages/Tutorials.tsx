@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import TutorialCard from "@/components/TutorialCard";
@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth"; 
+import { apiClient } from "@/lib/api";
 
 interface Tutorial {
   id: number;
@@ -47,6 +49,13 @@ interface Category {
 const Tutorials = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
+  const { user, isAuthenticated, initializeAuth } = useAuth(); // Add this line
+  const navigate = useNavigate(); // Add this import
+
+  useEffect(() => {
+    console.log('🔄 Tutorials page - Initializing auth...');
+    initializeAuth();
+  }, [initializeAuth]);
   
   // State for data and filters
   const [tutorials, setTutorials] = useState<Tutorial[]>([]);
@@ -63,57 +72,53 @@ const Tutorials = () => {
   const fetchTutorials = async () => {
     try {
       setLoading(true);
-      
-      const params = new URLSearchParams();
-      if (searchTerm) params.set('search', searchTerm);
-      if (selectedCategory !== 'all') params.set('category', selectedCategory);
-      if (selectedLevel !== 'all') params.set('level', selectedLevel);
 
-      const response = await fetch(`http://localhost:8000/api/tutorials?${params}`);
-      const data = await response.json();
+      const params = new URLSearchParams();
+      if (searchTerm) params.set("search", searchTerm);
+      if (selectedCategory !== "all") params.set("category", selectedCategory);
+      if (selectedLevel !== "all") params.set("level", selectedLevel);
+
+      const { data } = await apiClient.get(`/tutorials?${params.toString()}`);
 
       if (data.success) {
         setTutorials(data.tutorials);
       } else {
-        throw new Error(data.message || 'Failed to fetch tutorials');
+        throw new Error(data.message || "Failed to load tutorials");
       }
-    } catch (error) {
-      console.error('Error fetching tutorials:', error);
+      } catch (error) {
+        console.error("Error loading tutorials:", error);
       toast({
         title: "Error",
         description: "Failed to load tutorials",
-        variant: "destructive"
+        variant: "destructive",
       });
-      setTutorials([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+      } finally {
+        setLoading(false);
+      }
+    };
+
 
   // Fetch categories and levels
-  const fetchFilters = async () => {
+    const fetchFilters = async () => {
     try {
       const [categoriesResponse, levelsResponse] = await Promise.all([
-        fetch('http://localhost:8000/api/tutorials/categories/list'),
-        fetch('http://localhost:8000/api/tutorials/levels/list')
+        apiClient.get("/tutorials/categories/list"),
+        apiClient.get("/tutorials/levels/list"),
       ]);
 
-      const categoriesData = await categoriesResponse.json();
-      const levelsData = await levelsResponse.json();
-
-      if (categoriesData.success) {
-        setCategories(categoriesData.categories);
+      if (categoriesResponse.data.success) {
+        setCategories(categoriesResponse.data.categories);
       }
 
-      if (levelsData.success) {
-        setLevels(['all', ...levelsData.levels]);
+      if (levelsResponse.data.success) {
+        setLevels(["all", ...levelsResponse.data.levels]);
       }
-    } catch (error) {
-      console.error('Error fetching filters:', error);
-      // Fallback to default levels
-      setLevels(['all', 'Beginner', 'Intermediate', 'Advanced']);
-    }
-  };
+      } catch (error) {
+        console.error("Error loading filters:", error);
+        setLevels(["all", "Beginner", "Intermediate", "Advanced"]);
+      }
+    };
+
 
   // Update URL when filters change
   useEffect(() => {
@@ -129,6 +134,20 @@ const Tutorials = () => {
   useEffect(() => {
     fetchFilters();
   }, []);
+  
+  // Add this useEffect to handle non-student users
+  useEffect(() => {
+    if (isAuthenticated && user?.role !== 'student') {
+      toast({
+        title: "Access Restricted",
+        description: "Only students can browse and enroll in tutorials",
+        variant: "destructive"
+      });
+      navigate('/'); // Redirect to home or their dashboard
+    }
+  }, [isAuthenticated, user, navigate, toast]);
+  
+  // ... rest of your existing code
 
   useEffect(() => {
     fetchTutorials();
@@ -147,12 +166,12 @@ const Tutorials = () => {
     description: tutorial.description,
     category: tutorial.category.name,
     duration: tutorial.duration,
-    students: tutorial.students,
-    rating: tutorial.rating,
+    students: tutorial.students, // Real student count from database
+    rating: tutorial.rating, // Real rating from database
     level: tutorial.level,
     image: tutorial.image,
     instructor: tutorial.instructor,
-    lessons: tutorial.lessons,
+    lessons: tutorial.lessons, // Real lesson count from database
     content: '', // Optional field
   });
 

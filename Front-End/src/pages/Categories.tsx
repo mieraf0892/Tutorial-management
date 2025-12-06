@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Code, Palette, TrendingUp, Database, Smartphone, Globe, GraduationCap, BookOpen } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
 // Icon mapping for backend icons
 const iconMap = {
@@ -38,21 +39,32 @@ const Categories = () => {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/categories');
-        const data = await response.json();
+        const response = await apiClient.get('/categories');
+        const data = response.data;
 
         if (data.success) {
           setCategories(data.categories);
         } else {
           throw new Error(data.message || 'Failed to fetch categories');
         }
-      } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (error: any) {
         console.error('Error fetching categories:', error);
-        toast({
-          title: "Error",
-          description: "Failed to load categories",
-          variant: "destructive"
-        });
+        
+        // Handle different error types
+        if (error.response?.data) {
+          toast({
+            title: "Error",
+            description: error.response.data.message || "Failed to load categories",
+            variant: "destructive"
+          });
+        } else {
+          toast({
+            title: "Network Error",
+            description: "Cannot connect to server",
+            variant: "destructive"
+          });
+        }
         
         // Fallback to empty array
         setCategories([]);

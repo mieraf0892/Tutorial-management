@@ -8,9 +8,14 @@ import { Search, UserPlus } from "lucide-react";
 interface UserManagementDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onUserCreated?: () => void; // Add this line
 }
 
-export function UserManagementDialog({ open, onOpenChange }: UserManagementDialogProps) {
+export function UserManagementDialog({ 
+  open, 
+  onOpenChange, 
+  onUserCreated // Add this parameter
+}: UserManagementDialogProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
   const users = [
@@ -25,6 +30,30 @@ export function UserManagementDialog({ open, onOpenChange }: UserManagementDialo
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleAddUser = () => {
+    // Simulate user creation
+    console.log("Creating new user...");
+    
+    // Call the callback if provided
+    if (onUserCreated) {
+      onUserCreated();
+    }
+    
+    // You might want to keep the dialog open or close it
+    // onOpenChange(false); // Uncomment if you want to close after creation
+  };
+
+  const handleUserAction = (action: string, userId: number) => {
+    console.log(`${action} user ${userId}`);
+    
+    // If it's a create/edit action that modifies data, call the callback
+    if (action === "edit" || action === "create") {
+      if (onUserCreated) {
+        onUserCreated();
+      }
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,7 +74,7 @@ export function UserManagementDialog({ open, onOpenChange }: UserManagementDialo
                 className="pl-10"
               />
             </div>
-            <Button className="gap-2">
+            <Button className="gap-2" onClick={handleAddUser}>
               <UserPlus className="w-4 h-4" />
               Add User
             </Button>
@@ -74,8 +103,20 @@ export function UserManagementDialog({ open, onOpenChange }: UserManagementDialo
                     </Badge>
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline">Edit</Button>
-                    <Button size="sm" variant="ghost">Suspend</Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => handleUserAction("edit", user.id)}
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost"
+                      onClick={() => handleUserAction("suspend", user.id)}
+                    >
+                      Suspend
+                    </Button>
                   </div>
                 </div>
               </div>

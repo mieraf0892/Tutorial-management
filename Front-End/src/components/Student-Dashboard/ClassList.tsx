@@ -1,50 +1,130 @@
-// components/student-dashboard/ClassList.tsx
+// components/Student-Dashboard/ClassList.tsx
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronRight } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { PlayCircle, BookOpen, Calendar } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-interface Classroom {
+interface EnrolledTutorial {
   id: number;
-  name: string;
-  section: string;
-  teacher: string;
-  theme: string;
-  assignmentsDue: number;
-  grade: number;
+  title: string;
+  description: string;
+  category: string;
+  image: string;
+  instructor: string;
+  progress_percentage: number;
+  completed_lessons: number;
+  total_lessons: number;
+  last_accessed: string;
+  is_completed: boolean;
 }
 
 interface ClassListProps {
-  classes: Classroom[];
+  tutorials: EnrolledTutorial[];
 }
 
-export default function ClassList({ classes }: ClassListProps) {
+export default function ClassList({ tutorials }: ClassListProps) {
+  const navigate = useNavigate();
+
+  const handleTutorialClick = (tutorialId: number) => {
+    navigate(`/tutorials/${tutorialId}`);
+  };
+
+  const formatLastAccessed = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const getStatusText = (tutorial: EnrolledTutorial) => {
+    if (tutorial.is_completed) return "Completed";
+    if (tutorial.progress_percentage > 0) return "In Progress";
+    return "Not Started";
+  };
+
+  const getStatusColor = (tutorial: EnrolledTutorial) => {
+    if (tutorial.is_completed) return "text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-500/20";
+    if (tutorial.progress_percentage > 0) return "text-primary bg-primary/20";
+    return "text-muted-foreground bg-muted";
+  };
+
   return (
-    <Card className="border border-gray-200 shadow-sm">
-      <CardContent className="p-0">
-        <div className="divide-y divide-gray-200">
-          {classes.map((classroom) => (
-            <div key={classroom.id} className="p-4 hover:bg-gray-50 transition-colors cursor-pointer">
-              <div className="flex items-center gap-4">
-                <div className={`w-16 h-16 rounded-lg ${classroom.theme} flex items-center justify-center text-white font-bold text-lg`}>
-                  {classroom.name.split(' ').map(w => w[0]).join('')}
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-900">{classroom.name}</h3>
-                  <p className="text-gray-600 text-sm">{classroom.section} • {classroom.teacher}</p>
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-sm text-gray-500">{classroom.assignmentsDue} assignments due</span>
-                    <span className="text-sm font-medium text-gray-900">Grade: {classroom.grade}%</span>
+    <div className="space-y-4">
+      {tutorials.map((tutorial) => (
+        <Card 
+          key={tutorial.id}
+          className="cursor-pointer hover:shadow-lg transition-all duration-200 bg-card"
+          onClick={() => handleTutorialClick(tutorial.id)}
+        >
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              {/* Tutorial Image */}
+              <div className="shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-border">
+                <img
+                  src={tutorial.image}
+                  alt={tutorial.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+
+              {/* Tutorial Details */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h3 className="font-semibold text-lg mb-1 text-foreground hover:text-primary transition-colors">
+                      {tutorial.title}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
+                      {tutorial.description}
+                    </p>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(tutorial)}`}>
+                    {getStatusText(tutorial)}
                   </div>
                 </div>
-                <Button>
-                  Enter
-                  <ChevronRight className="w-4 h-4 ml-2" />
-                </Button>
+
+                <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
+                  <span className="flex items-center gap-1">
+                    <BookOpen className="w-4 h-4" />
+                    {tutorial.completed_lessons}/{tutorial.total_lessons} lessons
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-4 h-4" />
+                    {formatLastAccessed(tutorial.last_accessed)}
+                  </span>
+                  <span className="text-sm font-medium text-foreground">
+                    {tutorial.category}
+                  </span>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Progress</span>
+                    <span className="font-medium text-foreground">{Math.round(tutorial.progress_percentage)}%</span>
+                  </div>
+                  <Progress value={tutorial.progress_percentage} className="h-2 bg-muted" />
+                </div>
+
+                {/* Instructor */}
+                <div className="flex items-center justify-between mt-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Instructor</p>
+                    <p className="font-medium text-foreground">{tutorial.instructor}</p>
+                  </div>
+                  <Button size="sm" className="gap-2">
+                    <PlayCircle className="w-4 h-4" />
+                    Continue Learning
+                  </Button>
+                </div>
               </div>
             </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 }

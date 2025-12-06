@@ -1,102 +1,195 @@
-// components/tutor-dashboard/StudentsTab.tsx
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+// components/Tutor-Dashboard/StudentsTab.tsx
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { MessageSquare, MoreVertical, Download } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Search, Mail, Calendar, MessageCircle, Users } from "lucide-react";
 
 interface Student {
   id: number;
   name: string;
   email: string;
-  class: string;
-  submissions: number;
-  avgGrade: number;
-  pending: number;
-  trend: 'up' | 'down';
+  tutorial_id: number;
+  tutorial_title: string;
+  enrollment_date: string;
+  progress_percentage: number;
+  last_accessed: string;
+}
+
+interface Tutorial {
+  id: number;
+  title: string;
 }
 
 interface StudentsTabProps {
   students: Student[];
+  tutorials: Tutorial[];
+  onMessageStudent: (studentId: number) => void;
 }
 
-export default function StudentsTab({ students }: StudentsTabProps) {
+export default function StudentsTab({ students, tutorials, onMessageStudent }: StudentsTabProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTutorial, setSelectedTutorial] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"name" | "progress" | "recent">("name");
+
+  const filteredStudents = students
+    .filter(student => {
+      const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           student.email.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesTutorial = selectedTutorial === "all" || student.tutorial_title === selectedTutorial;
+      return matchesSearch && matchesTutorial;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "name":
+          return a.name.localeCompare(b.name);
+        case "progress":
+          return b.progress_percentage - a.progress_percentage;
+        case "recent":
+          return new Date(b.last_accessed).getTime() - new Date(a.last_accessed).getTime();
+        default:
+          return 0;
+      }
+    });
+
+  const getProgressColor = (progress: number) => {
+    if (progress >= 80) return "bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-400";
+    if (progress >= 50) return "bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-400";
+    return "bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-400";
+  };
+
   return (
-    <Card className="border border-gray-200 shadow-sm">
-      <CardHeader>
-        <div className="flex justify-between items-center">
-          <div>
-            <CardTitle>Student Performance</CardTitle>
-            <CardDescription>Monitor student progress and engagement</CardDescription>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground">Student Management</h2>
+        <p className="text-muted-foreground">View and manage all your students across tutorials</p>
+      </div>
+
+      {/* Filters and Search */}
+      <Card className="bg-card border-border">
+        <CardContent className="p-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="Search students by name or email..."
+                className="pl-10 bg-background"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            
+            <Select value={selectedTutorial} onValueChange={setSelectedTutorial}>
+              <SelectTrigger className="w-full md:w-[200px] bg-background">
+                <SelectValue placeholder="All Tutorials" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Tutorials</SelectItem>
+                {tutorials.map(tutorial => (
+                  <SelectItem key={tutorial.id} value={tutorial.title}>
+                    {tutorial.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sortBy} onValueChange={(value: "name" | "progress" | "recent") => setSortBy(value)}>
+              <SelectTrigger className="w-full md:w-[200px] bg-background">
+                <SelectValue placeholder="Sort by Name" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Sort by Name</SelectItem>
+                <SelectItem value="progress">Sort by Progress</SelectItem>
+                <SelectItem value="recent">Sort by Recent Activity</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <Button variant="outline" size="sm">
-            <Download className="w-4 h-4 mr-2" />
-            Export Grades
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {students.map((student) => (
-            <StudentItem key={student.id} student={student} />
+        </CardContent>
+      </Card>
+
+      {/* Students Grid */}
+      {filteredStudents.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredStudents.map((student) => (
+            <Card key={student.id} className="hover:shadow-lg transition-shadow bg-card border-border">
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle className="text-lg text-foreground">{student.name}</CardTitle>
+                    <CardDescription className="flex items-center gap-1 mt-1">
+                      <Mail className="w-3 h-3" />
+                      {student.email}
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onMessageStudent(student.id)}
+                    title={`Message ${student.name}`}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Tutorial</p>
+                    <Badge variant="secondary" className="mt-1 bg-muted text-muted-foreground">
+                      {student.tutorial_title}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Progress</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div
+                          className="bg-primary h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${student.progress_percentage}%` }}
+                        ></div>
+                      </div>
+                      <Badge className={getProgressColor(student.progress_percentage)}>
+                        {student.progress_percentage}%
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      Enrolled {new Date(student.enrollment_date).toLocaleDateString()}
+                    </div>
+                    <div>
+                      Last active {new Date(student.last_accessed).toLocaleDateString()}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StudentItem({ student }: { student: Student }) {
-  return (
-    <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-      <div className="flex items-center gap-4">
-        <Avatar className="h-12 w-12">
-          <AvatarFallback className="bg-linear-to-br from-blue-500 to-purple-600 text-white">
-            {student.name.split(' ').map(n => n[0]).join('')}
-          </AvatarFallback>
-        </Avatar>
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-gray-900">{student.name}</h3>
-            <Badge variant="outline" className="text-xs">
-              {student.trend === 'up' ? '📈 Improving' : '📉 Needs Help'}
-            </Badge>
-          </div>
-          <p className="text-sm text-gray-600">{student.email}</p>
-          <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-            <span>{student.submissions} submissions</span>
-            <span>Avg Grade: {student.avgGrade}%</span>
-            {student.pending > 0 && (
-              <span className="text-red-500">{student.pending} pending</span>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <Button variant="outline" size="sm">
-          <MessageSquare className="w-4 h-4 mr-2" />
-          Message
-        </Button>
-        <StudentDropdownMenu />
-      </div>
+      ) : (
+        <Card className="text-center py-12 bg-card border-border">
+          <CardContent>
+            <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-2">No students found</h3>
+            <p className="text-muted-foreground">
+              {searchQuery || selectedTutorial !== "all" 
+                ? "Try adjusting your search filters" 
+                : "Students will appear here when they enroll in your tutorials"}
+            </p>
+          </CardContent>
+        </Card>
+      )}
     </div>
-  );
-}
-
-function StudentDropdownMenu() {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon">
-          <MoreVertical className="w-4 h-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem>View Profile</DropdownMenuItem>
-        <DropdownMenuItem>Grade History</DropdownMenuItem>
-        <DropdownMenuItem>Send Feedback</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }

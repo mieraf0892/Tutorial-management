@@ -1,5 +1,5 @@
 <?php
-// database/migrations/xxxx_xx_xx_xxxxxx_create_tutorials_table.php
+// database/migrations/2025_11_07_create_tutorials_table.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -21,9 +21,13 @@ return new class extends Migration
             $table->string('image');
             $table->text('content')->nullable();
             $table->string('instructor');
+            $table->text('instructor_bio')->nullable();
+            $table->string('instructor_experience')->nullable();
             $table->integer('lessons')->default(0);
             $table->decimal('price', 8, 2)->default(0);
             $table->boolean('is_published')->default(true);
+            $table->json('learning_objectives')->nullable();
+            $table->json('includes')->nullable();
             $table->timestamps();
         });
     }

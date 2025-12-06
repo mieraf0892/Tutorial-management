@@ -1,101 +1,67 @@
 <?php
 
-use App\Http\Controllers\Auth\LoginController;
-use App\Http\Controllers\Auth\StudentAuthController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 // ============================
-// 🚀 Public Routes
+// 🚀 Load All Route Files
 // ============================
 
-// Auth
-Route::post('/register/student', [StudentAuthController::class, 'register']);
-Route::post('/register/tutor', [App\Http\Controllers\Auth\TutorAuthController::class, 'register']);
-Route::post('/login', [LoginController::class, 'login']);
+// Public routes (no authentication required)
+require __DIR__ . '/api/public.php';
 
-// ✅ Category Routes (public)
-Route::get('/categories', [App\Http\Controllers\Api\CategoryController::class, 'index']);
-Route::get('/categories/{slug}', [App\Http\Controllers\Api\CategoryController::class, 'show']);
-// Add these routes
-Route::get('/tutorials', [App\Http\Controllers\Api\TutorialController::class, 'index']);
-Route::get('/tutorials/{id}', [App\Http\Controllers\Api\TutorialController::class, 'show']);
-Route::get('/tutorials/categories/list', [App\Http\Controllers\Api\TutorialController::class, 'getCategories']);
-Route::get('/tutorials/levels/list', [App\Http\Controllers\Api\TutorialController::class, 'getLevels']);
-
-// Test API endpoint
-Route::get('/test', function () {
-    return response()->json(['message' => 'API is working!']);
-});
+// Authentication routes
+require __DIR__ . '/api/auth.php';
 
 // ============================
-// 🔐 Protected Routes (Require Authentication)
+// 🔐 Protected Routes (Authenticated Users)
 // ============================
 
-Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+Route::middleware(['auth:sanctum'])->group(function () {
+    
+    // Common authenticated user routes
+    require __DIR__ . '/api/shared/user.php';
+    
+    // Student routes (only these are created so far)
+    require __DIR__ . '/api/student/dashboard.php';
+    require __DIR__ . '/api/student/profile.php';
+    require __DIR__ . '/api/student/attendance.php';
+    require __DIR__ . '/api/student/enrollment.php';
+    // require __DIR__ . '/api/student/tutorials.php';
+    // require __DIR__ . '/api/student/finance.php';
 
-    // Admin dashboard data
-    Route::get('/admin/dashboard', function (Request $request) {
-        try {
-            $totalUsers = \App\Models\User::count();
-            $totalStudents = \App\Models\User::where('role', 'student')->count();
-            $totalTutors = \App\Models\User::where('role', 'tutor')->count();
-            $pendingVerifications = \App\Models\Tutor::where('is_verified', false)->count();
+    
+    // Tutor routes
+    require __DIR__ . '/api/tutor/dashboard.php';
+    require __DIR__ . '/api/tutor/profile.php';
+    require __DIR__ . '/api/tutor/tutorials.php';
+    require __DIR__ . '/api/tutor/attendance.php';
+    require __DIR__ . '/api/tutor/students.php';
+    // require __DIR__ . '/api/tutor/finance.php';
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Admin dashboard data',
-                'stats' => [
-                    'total_users' => $totalUsers,
-                    'total_students' => $totalStudents,
-                    'total_tutors' => $totalTutors,
-                    'pending_verifications' => $pendingVerifications,
-                ]
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch dashboard data',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    });
-
-    // Get all users
-    Route::get('/admin/users', function () {
-        try {
-            $users = \App\Models\User::with(['student', 'tutor'])
-                ->orderBy('created_at', 'desc')
-                ->get();
-
-            return response()->json([
-                'success' => true,
-                'users' => $users
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch users',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    });
-
-    // Get all students
-    Route::get('/admin/students', function () {
-        $students = \App\Models\Student::with('user')->get();
-        return response()->json([
-            'success' => true,
-            'students' => $students
-        ]);
-    });
-
-    // Get all tutors
-    Route::get('/admin/tutors', function () {
-        $tutors = \App\Models\Tutor::with('user')->get();
-        return response()->json([
-            'success' => true,
-            'tutors' => $tutors
-        ]);
-    });
+    
+    // Messaging routes
+    require __DIR__ . '/api/messages/conversations.php';
+    require __DIR__ . '/api/messages/messages.php';
+    require __DIR__ . '/api/messages/announcements.php';
+    
+    // Shared routes (tutorial sessions)
+    require __DIR__ . '/api/shared/sessions.php';
+    
+    // Admin routes
+    require __DIR__ . '/api/admin/dashboard.php';
+    require __DIR__ . '/api/admin/users.php';
+    require __DIR__ . '/api/admin/classes.php';
+    require __DIR__ . '/api/admin/attendance.php';
+    require __DIR__ . '/api/admin/communication.php';
+    require __DIR__ . '/api/admin/tutor_approvals.php';
+    
+    // TEMPORARY: Comment out other routes until we create them
+    /*
+    // Super Admin routes
+    require __DIR__ . '/api/super-admin/dashboard.php';
+    require __DIR__ . '/api/super-admin/system.php';
+    
+    // Staff routes (if needed)
+    require __DIR__ . '/api/staff.php';
+    */
 });

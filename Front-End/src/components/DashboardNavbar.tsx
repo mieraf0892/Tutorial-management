@@ -3,7 +3,7 @@ import { BookOpen, LogOut, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 interface DashboardNavbarProps {
-  userRole?: "student" | "tutor" | "admin";
+  userRole?: "student" | "tutor" | "admin" | "super_admin";
   onLogout?: () => void;
 }
 

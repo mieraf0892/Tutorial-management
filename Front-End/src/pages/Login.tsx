@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { apiClient } from "@/lib/api";
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -17,73 +18,79 @@ const Login = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const redirectUrl = searchParams.get('redirect') || '/student';
+  const redirectUrl = searchParams.get('redirect') || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  e.preventDefault();
+  setLoading(true);
 
-    try {
-      const response = await fetch('http://localhost:8000/api/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(formData),
+  try {
+    const response = await apiClient.post('/login', formData);
+    const data = response.data;
+
+    if (data.success) {
+      // ✅ FIX: Store token as 'token' (not 'auth_token')
+      localStorage.setItem('token', data.token); // CHANGED THIS LINE
+      localStorage.setItem('user', JSON.stringify(data.user));
+      
+      toast({
+        title: "Success",
+        description: data.message,
       });
 
-      const data = await response.json();
-
-      if(redirectUrl){
-        navigate(redirectUrl);
-      } else {
-        // Role-based redirect as fallback
-        if (data.user.role === 'student') {
-            navigate('/student');
-        } else if (data.user.role === 'tutor') {
-            navigate('/tutor');
-        } else if (data.user.role === 'admin') {
-            navigate('/admin');
-        }
-      }
-
-      if (response.ok && data.success) {
-        // Save token to localStorage
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        
-        toast({
-          title: "Success",
-          description: data.message,
-        });
-
-        // Redirect based on role
-      if (data.user.role === 'student') {
-        navigate('/student');
-      } else if (data.user.role === 'tutor') {
-        navigate('/tutor');
-      } else if (data.user.role === 'admin') {
-        navigate('/admin');
-      }
-        
-      } else {
-        toast({
-          title: "Login Failed",
-          description: data.message || "Invalid credentials",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
+      // Handle redirects
+      // Handle redirects
+if (redirectUrl) {
+  navigate(redirectUrl);
+} else {
+  // Role-based redirect as fallback
+  switch (data.user.role) {
+    case 'super_admin':
+      navigate('/super-admin', { replace: true });
+      break;
+    case 'admin':
+      navigate('/admin', { replace: true });
+      break;
+    case 'staff':
+      navigate('/staff', { replace: true });
+      break;
+    case 'tutor':
+      navigate('/tutor', { replace: true });
+      break;
+    case 'student':
+      navigate('/student', { replace: true });
+      break;
+    default:
+      navigate('/student', { replace: true });
+  }
+}
+    } else {
+      toast({
+        title: "Login Failed",
+        description: data.message || "Invalid credentials",
+        variant: "destructive"
+      });
+    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (error: any) {
+    // Handle different error types
+    if (error.response?.data) {
+      toast({
+        title: "Login Failed",
+        description: error.response.data.message || "Invalid credentials",
+        variant: "destructive"
+      });
+    } else {
       toast({
         title: "Network Error",
         description: "Cannot connect to server",
         variant: "destructive"
       });
-    } finally {
-      setLoading(false);
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -113,16 +120,17 @@ const Login = () => {
                   type="password"
                   placeholder="Enter your password"
                   value={formData.password}
-                   onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  onChange={(e) => setFormData({...formData, password: e.target.value})}
                   required
                 />
               </div>
 
               <Button 
-              type="submit" 
-              className="w-full" 
-              disabled={loading}
-              variant="default">
+                type="submit" 
+                className="w-full" 
+                disabled={loading}
+                variant="default"
+              >
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>

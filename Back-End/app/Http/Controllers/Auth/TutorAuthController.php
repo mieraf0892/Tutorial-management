@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage; // ADD THIS
 
 class TutorAuthController extends Controller
 {
@@ -38,6 +39,9 @@ class TutorAuthController extends Controller
             'qualification' => 'required|string|max:255',
             'experienceYears' => 'required|integer|min:0|max:50',
             'hourlyRate' => 'required|numeric|min:0',
+            
+            // ADD: Degree photo validation
+            'degreePhoto' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120', // 5MB max
             
             // Subjects and specializations
             'subjects' => 'required|array|min:1',
@@ -71,7 +75,16 @@ class TutorAuthController extends Controller
                 'password' => Hash::make($request->password),
                 'role' => 'tutor',
                 'phone' => $request->phone,
+                'status' => 'pending',
             ]);
+
+            // Handle degree photo upload
+            $degreePhotoPath = null;
+            if ($request->hasFile('degreePhoto')) {
+                $degreePhoto = $request->file('degreePhoto');
+                // Store in storage/app/public/degree-photos
+                $degreePhotoPath = $degreePhoto->store('degree-photos', 'public');
+            }
 
             // Create Tutor
             $tutor = Tutor::create([
@@ -86,8 +99,11 @@ class TutorAuthController extends Controller
                 'address' => $request->address,
                 'bio' => $request->bio,
                 'qualification' => $request->qualification,
+                'degree_photo' => $degreePhotoPath, // ADD THIS
+                'degree_verified' => 'pending', // ADD THIS - default status
                 'experience_years' => $request->experienceYears,
                 'hourly_rate' => $request->hourlyRate,
+                'is_verified' => false,
             ]);
 
             // Create Tutor Subjects
@@ -114,21 +130,61 @@ class TutorAuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Tutor registered successfully!',
+                'message' => 'Tutor registration submitted for admin approval! You will be notified once approved.',
                 'user' => [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
                     'role' => $user->role,
-                ]
+                    'status' => $user->status,
+                ],
+                'degree_photo_uploaded' => !empty($degreePhotoPath), // ADD THIS
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             
+            // Delete uploaded file if transaction fails
+            if (!empty($degreePhotoPath) && Storage::disk('public')->exists($degreePhotoPath)) {
+                Storage::disk('public')->delete($degreePhotoPath);
+            }
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Tutor registration failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // ADD THIS: Helper function to get degree photo URL
+    public function getDegreePhoto($tutorId)
+    {
+        try {
+            $tutor = Tutor::findOrFail($tutorId);
+            
+            if (!$tutor->degree_photo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Degree photo not found'
+                ], 404);
+            }
+
+            // Check if file exists
+            if (!Storage::disk('public')->exists($tutor->degree_photo)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Degree photo file not found'
+                ], 404);
+            }
+
+            // Return the file
+            return Storage::disk('public')->response($tutor->degree_photo);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching degree photo',
                 'error' => $e->getMessage()
             ], 500);
         }

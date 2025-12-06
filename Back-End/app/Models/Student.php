@@ -14,19 +14,16 @@ class Student extends Model
         'country', 'phone_code', 'city', 'subcity', 'address', 'course_type'
     ];
 
-    // Relationship with User
     public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    // Relationship with Learning Preferences
-    public function learningPreference()
+    public function learningPreferences()
     {
         return $this->hasOne(StudentLearningPreference::class);
     }
 
-    // Relationship with Course Details
     public function courseDetails()
     {
         return $this->hasMany(StudentCourseDetail::class);

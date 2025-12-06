@@ -16,4 +16,13 @@ export default defineConfig({
   build: {
     cssCodeSplit: false,
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
+  }
 })

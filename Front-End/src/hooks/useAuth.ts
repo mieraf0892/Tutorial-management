@@ -1,70 +1,111 @@
-import { useState, useEffect } from 'react';
+import { create } from 'zustand';
+import { apiClient } from '@/lib/api';
 
 interface User {
-  id: number;
+  id: string;
   name: string;
   email: string;
-  role: 'student' | 'tutor' | 'admin';
+  role: 'super_admin' | 'admin' | 'staff' | 'tutor' | 'student';
+  role_display: string;
+  phone?: string;
+  profile?: any;
 }
 
-export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean }>;
+  logout: () => void;
+  hasRole: (role: User['role']) => boolean;
+  canAccessAdmin: () => boolean;
+  isSuperAdmin: () => boolean;
+  isStaff: () => boolean;
+  initializeAuth: () => void;
+}
 
-  useEffect(() => {
-    const checkAuth = () => {
-      const token = localStorage.getItem('auth_token');
-      const userData = localStorage.getItem('user');
-      
-      if (token && userData) {
-        try {
-          setUser(JSON.parse(userData));
-        } catch (error) {
-          console.error('Error parsing user data:', error);
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('user');
-        }
+export const useAuth = create<AuthState>((set, get) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+
+  initializeAuth: () => {
+    console.log('🔄 initializeAuth called');
+    const token = localStorage.getItem('token');
+    const userData = localStorage.getItem('user');
+
+    console.log('📦 LocalStorage data:', { token: !!token, userData: !!userData });
+    
+    if (token && userData) {
+      try {
+        const user = JSON.parse(userData);
+        console.log('✅ Auth initialized successfully:', { user: user.name, role: user.role });
+        set({ 
+          user, 
+          isAuthenticated: true, 
+          isLoading: false 
+        });
+      } catch (error) {
+        console.error('❌ Auth initialization failed:', error);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        set({ user: null, isAuthenticated: false, isLoading: false });
       }
-      setLoading(false);
-    };
-
-    checkAuth();
-  }, []);
-
-  const login = (token: string, userData: User) => {
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
-    setUser(userData);
-  };
-
-const logout = async () => {
-  const token = localStorage.getItem('auth_token');
-  
-  // Call backend logout (optional but good practice)
-  if (token) {
-    try {
-      await fetch('http://localhost:8000/api/logout', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-    } catch (error) {
-      console.error('Logout error:', error);
+    } else {
+      console.log('❌ No auth data in localStorage');
+      set({ isLoading: false });
     }
-  }
-  
-  // CLEAR EVERYTHING from localStorage
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('user');
-  
-  // Clear React state
-  setUser(null);
-  
-  // Force redirect to login
-  window.location.href = '/login';
-};
+  },
 
-  return { user, loading, login, logout };
-};
+  login: async (email: string, password: string) => {
+    set({ isLoading: true });
+    try {
+      const response = await apiClient.post('/login', { email, password });
+      const { user, token, success } = response.data;
+      
+      if (success) {
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        
+        set({ 
+          user, 
+          isAuthenticated: true, 
+          isLoading: false 
+        });
+        
+        return { success: true };
+      } else {
+        throw new Error('Login failed');
+      }
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    set({ user: null, isAuthenticated: false });
+  },
+
+  hasRole: (role) => {
+    const { user } = get();
+    return user ? user.role === role : false;
+  },
+
+  canAccessAdmin: () => {
+    const { user } = get();
+    return user ? (user.role === 'admin' || user.role === 'super_admin') : false;
+  },
+
+  isSuperAdmin: () => {
+    const { user } = get();
+    return user ? user.role === 'super_admin' : false;
+  },
+
+  isStaff: () => {
+    const { user } = get();
+    return user ? user.role === 'staff' : false;
+  }
+}));

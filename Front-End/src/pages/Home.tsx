@@ -1,11 +1,32 @@
+import { useState, useEffect } from "react";
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import TutorialCard from "@/components/TutorialCard";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { tutorialsData } from "@/data/tutorials";
 import { Code, Palette, TrendingUp, Database, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
+import { apiClient } from "@/lib/api";
+
+interface Tutorial {
+  id: number;
+  title: string;
+  description: string;
+  category: {
+    id: number;
+    name: string;
+    slug: string;
+  };
+  duration: string;
+  students: number;
+  rating: number;
+  level: "Beginner" | "Intermediate" | "Advanced";
+  image: string;
+  instructor: string;
+  lessons: number;
+  price: number;
+  is_published: boolean;
+}
 
 const categories = [
   { name: "Web Development", icon: Code, count: 450 },
@@ -15,7 +36,45 @@ const categories = [
 ];
 
 const Home = () => {
-  const featuredTutorials = tutorialsData.slice(0, 6);
+  const [featuredTutorials, setFeaturedTutorials] = useState<Tutorial[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch tutorials from backend
+  useEffect(() => {
+    const fetchFeaturedTutorials = async () => {
+      try {
+        const response = await apiClient.get('/tutorials');
+        const data = response.data;
+        
+        if (data.success) {
+          // Take first 6 tutorials for featured section
+          setFeaturedTutorials(data.tutorials.slice(0, 6));
+        }
+      } catch (error) {
+        console.error('Error fetching tutorials:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFeaturedTutorials();
+  }, []);
+
+  // Transform backend data to match TutorialCard props
+  const transformTutorialData = (tutorial: Tutorial) => ({
+    id: tutorial.id.toString(),
+    title: tutorial.title,
+    description: tutorial.description,
+    category: tutorial.category.name,
+    duration: tutorial.duration,
+    students: tutorial.students,
+    rating: tutorial.rating,
+    level: tutorial.level,
+    image: tutorial.image,
+    instructor: tutorial.instructor,
+    lessons: tutorial.lessons,
+    content: '', // Optional field
+  });
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -74,11 +133,24 @@ const Home = () => {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featuredTutorials.map((tutorial) => (
-              <TutorialCard key={tutorial.id} {...tutorial} />
-            ))}
-          </div>
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="text-lg">Loading featured tutorials...</div>
+            </div>
+          ) : featuredTutorials.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {featuredTutorials.map((tutorial) => (
+                <TutorialCard 
+                  key={tutorial.id} 
+                  {...transformTutorialData(tutorial)} 
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No tutorials found.</p>
+            </div>
+          )}
 
           <div className="text-center mt-8 md:hidden">
             <Button variant="outline" asChild>
@@ -92,30 +164,30 @@ const Home = () => {
       </section>
 
       {/* CTA Section */}
-<section className="py-20 container mx-auto px-4">
-  <div className="relative overflow-hidden rounded-2xl bg-primary p-12 md:p-16 text-center">
-    <div className="absolute inset-0 bg-grid-pattern opacity-10" />
-    <div className="relative z-10">
-      <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground mb-4">
-        Ready to Start Learning?
-      </h2>
-      <p className="text-primary-foreground/90 text-lg mb-8 max-w-2xl mx-auto">
-        Join thousands of students already learning on TutorialHub. Start your journey today!
-      </p>
-      <Button
-        size="lg"
-        variant="secondary"
-        asChild
-        className="shadow-xl"
-      >
-        <Link to="/register">  {/* Changed from /tutorials to /register */}
-          Get Started Free
-          <ArrowRight className="ml-2 h-5 w-5" />
-        </Link>
-      </Button>
-    </div>
-  </div>
-</section>
+      <section className="py-20 container mx-auto px-4">
+        <div className="relative overflow-hidden rounded-2xl bg-primary p-12 md:p-16 text-center">
+          <div className="absolute inset-0 bg-grid-pattern opacity-10" />
+          <div className="relative z-10">
+            <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground mb-4">
+              Ready to Start Learning?
+            </h2>
+            <p className="text-primary-foreground/90 text-lg mb-8 max-w-2xl mx-auto">
+              Join thousands of students already learning on TutorialHub. Start your journey today!
+            </p>
+            <Button
+              size="lg"
+              variant="secondary"
+              asChild
+              className="shadow-xl"
+            >
+              <Link to="/register">
+                Get Started Free
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </section>
 
       <Footer />
     </div>

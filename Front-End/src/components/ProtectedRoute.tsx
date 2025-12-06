@@ -1,36 +1,50 @@
-import { Navigate, useLocation } from 'react-router-dom';
+// src/components/ProtectedRoute.tsx
+import React from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: 'student' | 'tutor' | 'admin';
+  requiredRole?: 'student' | 'tutor' | 'admin' | 'super_admin' | 'staff';
+  adminOnly?: boolean;
+  fallback?: React.ReactNode;
 }
 
-const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
-  const { user, loading } = useAuth();
-  const location = useLocation();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+  children,
+  requiredRole,
+  adminOnly = false,
+  fallback = <div>Access Denied</div>,
+}) => {
+  const { isAuthenticated, user, hasRole, canAccessAdmin, isLoading } = useAuth();
 
-  // Show loading while checking authentication
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loding....</div>
-      </div>
-    );
+  // ✅ Check localStorage directly as fallback
+  const token = localStorage.getItem('token');
+  const userData = localStorage.getItem('user');
+  
+  // If useAuth hasn't initialized yet but we have tokens, consider authenticated
+  const isReallyAuthenticated = isAuthenticated || (token && userData);
+
+  // Show loading while auth state is initializing
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
-  // Redirect to login if not authenticated
-  if (!user) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+  if (!isReallyAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
 
-  // Check role if required
-  if (requiredRole && user.role !== requiredRole) {
-    // Redirect to unauthorized or home page
-    return <Navigate to="/?message=unauthorized" replace />;
+  // Parse user data from localStorage if useAuth user is null
+  const currentUser = user || (userData ? JSON.parse(userData) : null);
+
+  if (adminOnly && !canAccessAdmin()) {
+    return <>{fallback}</>;
   }
 
-  // User is authenticated and has the right role
+  if (requiredRole && currentUser?.role !== requiredRole) {
+    return <>{fallback}</>;
+  }
+
   return <>{children}</>;
 };
 

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Code, Globe, GraduationCap } from "lucide-react";
+import { apiClient } from "@/lib/api";
 
 // Import shared constants
 const countries = ["Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Austria", "Bangladesh", "Belgium", "Brazil", "Canada", "Chile", "China", "Colombia", "Denmark", "Egypt", "Ethiopia", "Finland", "France", "Germany", "Ghana", "Greece", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Japan", "Jordan", "Kenya", "Lebanon", "Malaysia", "Mexico", "Morocco", "Netherlands", "New Zealand", "Nigeria", "Norway", "Pakistan", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Saudi Arabia", "Singapore", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland", "Syria", "Thailand", "Turkey", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Venezuela", "Vietnam", "Yemen"];
@@ -105,7 +106,9 @@ const TutorForm = () => {
         hourlyRate: 200,
         
         // Subjects - convert based on specialty
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         subjects: [] as any[],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         availability: [] as any[]
       };
 
@@ -150,19 +153,11 @@ const TutorForm = () => {
         }
       }
 
-      // Send to Laravel backend
-      const response = await fetch('http://localhost:8000/api/register/tutor', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(backendData),
-      });
+      // Send to Laravel backend using apiClient
+      const response = await apiClient.post('/register/tutor', backendData);
+      const data = response.data;
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
+      if (data.success) {
         toast({ 
           title: "Success", 
           description: data.message || "Tutor registration successful! Redirecting to login..." 
@@ -200,13 +195,34 @@ const TutorForm = () => {
         }
       }
 
-    } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
       console.error('Registration error:', error);
-      toast({ 
-        title: "Network Error", 
-        description: "Cannot connect to server. Please try again.",
-        variant: "destructive" 
-      });
+      
+      // Handle different error types
+      if (error.response?.data) {
+        const data = error.response.data;
+        if (data.errors) {
+          const firstError = Object.values(data.errors)[0];
+          toast({ 
+            title: "Validation Error", 
+            description: Array.isArray(firstError) ? firstError[0] : "Please check your input",
+            variant: "destructive" 
+          });
+        } else {
+          toast({ 
+            title: "Error", 
+            description: data.message || "Registration failed",
+            variant: "destructive" 
+          });
+        }
+      } else {
+        toast({ 
+          title: "Network Error", 
+          description: "Cannot connect to server. Please try again.",
+          variant: "destructive" 
+        });
+      }
     }
   };
 

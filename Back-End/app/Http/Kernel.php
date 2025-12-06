@@ -7,62 +7,45 @@ use Illuminate\Foundation\Http\Kernel as HttpKernel;
 class Kernel extends HttpKernel
 {
     /**
-     * Global HTTP middleware stack.
+     * The application's global HTTP middleware stack.
      *
-     * These middleware run during every request to your application.
-     *
-     * @var array<int, class-string|string>
+     * These middleware run during every request.
      */
     protected $middleware = [
-        // Handle CORS
-        \Fruitcake\Cors\HandleCors::class,
-
-        // Trust proxies
+        // \App\Http\Middleware\TrustHosts::class,
         \App\Http\Middleware\TrustProxies::class,
-
-        // Handle maintenance mode
-        \Illuminate\Foundation\Http\Middleware\CheckForMaintenanceMode::class,
-
-        // Validate post size
+        \Illuminate\Http\Foundation\Http\Middleware\PreventRequestsDuringMaintenance::class,
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
-
-        // Trim strings
         \App\Http\Middleware\TrimStrings::class,
-
-        // Convert empty strings to null
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
-
-        \App\Http\Middleware\EncryptCookies::class,
-
     ];
 
     /**
-     * Route middleware groups.
-     *
-     * @var array<string, array<int, class-string|string>>
+     * The application's route middleware groups.
      */
     protected $middlewareGroups = [
         'web' => [
             \App\Http\Middleware\EncryptCookies::class,
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
+            // \Illuminate\Session\Middleware\AuthenticateSession::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
 
         'api' => [
-            'throttle:api',
+            // Limit API requests (optional)
+            \Illuminate\Routing\Middleware\ThrottleRequests::class . ':api',
+
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
     ];
 
     /**
-     * Route middleware.
+     * Route middleware (single-use middleware).
      *
-     * These middleware may be assigned to groups or used individually.
-     *
-     * @var array<string, class-string|string>
+     * Assign middleware keys for use in routes.
      */
     protected $routeMiddleware = [
         'auth' => \App\Http\Middleware\Authenticate::class,
@@ -74,8 +57,8 @@ class Kernel extends HttpKernel
         'signed' => \Illuminate\Routing\Middleware\ValidateSignature::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
-        'student' => \App\Http\Middleware\StudentMiddleware::class,
-        'tutor' => \App\Http\Middleware\TutorMiddleware::class,
+
+        // 👉 Your custom admin middleware
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
     ];
 }

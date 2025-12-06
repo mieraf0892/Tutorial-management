@@ -1,207 +1,168 @@
-// components/student-dashboard/StreamTab.tsx
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+// components/Student-Dashboard/StreamTab.tsx
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Clock, Upload, Eye, MessageSquare, PlayCircle, FileText, Bell, BookOpen, Calendar, Star } from "lucide-react";
+import { Calendar, BookOpen, CheckCircle, MessageSquare } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-interface StreamItem {
-  id: number;
-  type: 'assignment' | 'announcement' | 'material';
+interface RecentActivity {
+  type: string;
   title: string;
-  class: string;
-  teacher: string;
-  dueDate?: string;
-  posted?: string;
-  points?: number;
-  status?: string;
-  submitted?: boolean;
-  grade?: number | null;
+  tutorial_name: string;
+  time: string;
   description: string;
-  attachments: number;
-  comments: number;
 }
 
-interface Assignment {
-  id: number;
-  title: string;
-  class: string;
-  dueDate: string;
-  dueTime: string;
-  points: number;
-  status: string;
-  submitted: boolean;
+interface UpcomingLesson {
+  tutorial_id: number;
+  tutorial_title: string;
+  lesson_id: number;
+  lesson_title: string;
+  lesson_duration: string;
+  is_preview: boolean;
+  due_date: string | null;
 }
 
 interface StreamTabProps {
-  streamItems: StreamItem[];
-  upcomingAssignments: Assignment[];
+  recentActivities: RecentActivity[];
+  upcomingLessons: UpcomingLesson[];
 }
 
-export default function StreamTab({ streamItems, upcomingAssignments }: StreamTabProps) {
-  return (
-    <div className="space-y-6">
-      {/* Upcoming Assignments */}
-      <Card className="border border-gray-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Clock className="w-5 h-5 text-orange-500" />
-            Upcoming Assignments
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-gray-200">
-            {upcomingAssignments.map((assignment) => (
-              <UpcomingAssignment key={assignment.id} assignment={assignment} />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+export default function StreamTab({ recentActivities, upcomingLessons }: StreamTabProps) {
+  const navigate = useNavigate();
 
-      {/* Stream Items */}
-      <div className="space-y-4">
-        {streamItems.map((item) => (
-          <StreamItemCard key={item.id} item={item} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function UpcomingAssignment({ assignment }: { assignment: Assignment }) {
-  return (
-    <div className="p-4 hover:bg-gray-50 transition-colors">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${
-            assignment.status === 'due-soon' ? 'bg-red-500' :
-            assignment.status === 'due-tomorrow' ? 'bg-orange-500' : 'bg-blue-500'
-          }`} />
-          <div>
-            <h4 className="font-medium text-gray-900">{assignment.title}</h4>
-            <p className="text-sm text-gray-600">
-              {assignment.class} • Due {assignment.dueDate} at {assignment.dueTime}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="outline" className="bg-blue-50">
-            {assignment.points} pts
-          </Badge>
-          {!assignment.submitted && (
-            <Button size="sm">
-              <Upload className="w-4 h-4 mr-2" />
-              Submit
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StreamItemCard({ item }: { item: StreamItem }) {
-  const getIcon = (type: string) => {
+  const getActivityIcon = (type: string) => {
     switch (type) {
-      case 'assignment': return FileText;
-      case 'announcement': return Bell;
-      case 'material': return BookOpen;
-      default: return FileText;
+      case 'lesson_completed':
+        return <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500" />;
+      case 'announcement':
+        return <MessageSquare className="w-5 h-5 text-blue-600 dark:text-blue-500" />;
+      default:
+        return <BookOpen className="w-5 h-5 text-muted-foreground" />;
     }
   };
 
-  const getIconColor = (type: string) => {
-    switch (type) {
-      case 'assignment': return 'bg-blue-100 text-blue-600';
-      case 'announcement': return 'bg-green-100 text-green-600';
-      case 'material': return 'bg-purple-100 text-purple-600';
-      default: return 'bg-gray-100 text-gray-600';
-    }
+  const formatTime = (timeString: string) => {
+    const time = new Date(timeString);
+    const now = new Date();
+    const diffHours = Math.abs(now.getTime() - time.getTime()) / (1000 * 60 * 60);
+    
+    if (diffHours < 1) return "Just now";
+    if (diffHours < 24) return `${Math.floor(diffHours)} hours ago`;
+    return time.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
-  const Icon = getIcon(item.type);
+  const handleLessonClick = (tutorialId: number, lessonId: number) => {
+    navigate(`/tutorials/${tutorialId}/lessons/${lessonId}`);
+  };
 
   return (
-    <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-      <CardContent className="p-6">
-        <div className="flex items-start gap-4">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${getIconColor(item.type)}`}>
-            <Icon className="w-5 h-5" />
-          </div>
-          
-          <div className="flex-1">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="font-semibold text-gray-900 hover:text-blue-600 cursor-pointer">
-                  {item.title}
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  {item.class} • {item.teacher}
-                </p>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Recent Activities */}
+      <div className="lg:col-span-2">
+        <Card>
+          <CardContent className="p-6">
+            <h2 className="text-xl font-semibold mb-4 text-foreground">Recent Activity</h2>
+            
+            {recentActivities.length > 0 ? (
+              <div className="space-y-4">
+                {recentActivities.map((activity, index) => (
+                  <div 
+                    key={index} 
+                    className="flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 transition-colors"
+                  >
+                    <div className="shrink-0 mt-1">
+                      {getActivityIcon(activity.type)}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-foreground mb-1">
+                        {activity.title}
+                      </h4>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {activity.description}
+                      </p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">
+                          {activity.tutorial_name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTime(activity.time)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {item.type === 'assignment' && (
-                <Badge variant={
-                  item.status === 'graded' ? 'default' :
-                  item.status === 'assigned' ? 'secondary' : 'outline'
-                } className="flex items-center gap-1">
-                  {item.status === 'graded' ? `Graded: ${item.grade}/${item.points}` : 'Assigned'}
-                </Badge>
-              )}
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <BookOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <p>No recent activity yet</p>
+                <p className="text-sm">Complete some lessons to see your activity here</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Upcoming Lessons */}
+      <div>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Calendar className="w-5 h-5 text-muted-foreground" />
+              <h2 className="text-xl font-semibold text-foreground">Upcoming Lessons</h2>
             </div>
+            
+            {upcomingLessons.length > 0 ? (
+              <div className="space-y-3">
+                {upcomingLessons.slice(0, 5).map((lesson, index) => (
+                  <div 
+                    key={index}
+                    className="p-3 rounded-lg border border-border hover:border-primary cursor-pointer transition-colors group bg-card"
+                    onClick={() => handleLessonClick(lesson.tutorial_id, lesson.lesson_id)}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h4 className="font-medium text-sm text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                        {lesson.lesson_title}
+                      </h4>
+                      {lesson.is_preview && (
+                        <span className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-full">
+                          Preview
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-2 line-clamp-1">
+                      {lesson.tutorial_title}
+                    </p>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{lesson.lesson_duration}</span>
+                      <Button size="sm" variant="ghost" className="h-6 text-xs">
+                        Start
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground">
+                <Calendar className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                <p className="text-sm">No upcoming lessons</p>
+                <p className="text-xs">Continue learning to see upcoming lessons</p>
+              </div>
+            )}
 
-            <p className="text-gray-700 mt-2">{item.description}</p>
-
-            <div className="flex items-center gap-6 mt-4 text-sm text-gray-600">
-              {item.type === 'assignment' && (
-                <>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    Due {item.dueDate}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Star className="w-4 h-4" />
-                    {item.points} points
-                  </span>
-                </>
-              )}
-              {item.type !== 'assignment' && (
-                <span className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
-                  {item.posted}
-                </span>
-              )}
-              <span className="flex items-center gap-1">
-                <FileText className="w-4 h-4" />
-                {item.attachments} attachment{item.attachments !== 1 ? 's' : ''}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3 mt-4">
-              {item.type === 'assignment' && !item.submitted && (
-                <Button size="sm">
-                  <Upload className="w-4 h-4 mr-2" />
-                  Submit Assignment
-                </Button>
-              )}
-              {item.type === 'assignment' && item.submitted && (
-                <Button variant="outline" size="sm">
-                  <Eye className="w-4 h-4 mr-2" />
-                  View Submission
-                </Button>
-              )}
-              <Button variant="outline" size="sm">
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Comment
+            {upcomingLessons.length > 5 && (
+              <Button variant="outline" className="w-full mt-4">
+                View All Upcoming Lessons
               </Button>
-              {item.type === 'material' && (
-                <Button variant="outline" size="sm">
-                  <PlayCircle className="w-4 h-4 mr-2" />
-                  View Material
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
