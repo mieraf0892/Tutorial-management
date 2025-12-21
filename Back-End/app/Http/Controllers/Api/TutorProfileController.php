@@ -5,6 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use App\Models\Tutor;
+use App\Models\TutorSubject;
+use App\Models\TutorAvailability;
+use App\Models\User;
+use Illuminate\Support\Facades\Validator;
 
 class TutorProfileController extends Controller
 {
@@ -252,4 +259,193 @@ class TutorProfileController extends Controller
             ], 500);
         }
     }
+
+    /**
+ * Complete tutor profile (for tutors with pending_profile status)
+ */
+public function completeProfile(Request $request)
+{
+    // Start database transaction
+    DB::beginTransaction();
+    
+    try {
+        $user = $request->user();
+        
+        // Check if user is tutor
+        if (!$user->isTutor()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Access denied. Tutors only.'
+            ], 403);
+        }
+        
+        // Only allow tutors with pending_profile status
+        if ($user->status !== 'pending_profile') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Profile already completed or approved. Current status: ' . $user->status
+            ], 400);
+        }
+        
+        // Validate the request
+        $validator = Validator::make($request->all(), [
+            // Personal information
+            'phone' => 'required|string',
+            'age' => 'required|integer|min:18|max:100',
+            'sex' => 'required|in:male,female',
+            'country' => 'required|string',
+            'city' => 'nullable|string',
+            'subcity' => 'nullable|string',
+            'address' => 'required|string',
+            
+            // Professional information
+            'bio' => 'required|string|min:50|max:1000',
+            'qualification' => 'required|string|max:255',
+            'experience_years' => 'required|integer|min:0|max:50',
+            'hourly_rate' => 'required|numeric|min:0',
+            
+            // Degree photo
+            'degree_photo' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120', // 5MB max
+            
+            // Subjects and specializations
+            'subjects' => 'required|array|min:1',
+            'subjects.*.name' => 'required|string',
+            'subjects.*.specialization' => 'nullable|string',
+            'subjects.*.level' => 'required|in:beginner,intermediate,advanced',
+            
+            // Availability
+            'availability' => 'required|array|min:1',
+            'availability.*.day' => 'required|string|in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+            'availability.*.start_time' => 'required|date_format:H:i',
+            'availability.*.end_time' => 'required|date_format:H:i|after:availability.*.start_time',
+        ]);
+        
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+        
+        // Handle degree photo upload
+        $degreePhotoPath = null;
+        if ($request->hasFile('degree_photo')) {
+            $degreePhoto = $request->file('degree_photo');
+            $degreePhotoPath = $degreePhoto->store('degree-photos', 'public');
+        }
+        
+        // Create or update tutor profile
+        $tutor = Tutor::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'phone' => $request->phone,
+                'age' => $request->age,
+                'sex' => $request->sex,
+                'country' => $request->country,
+                'city' => $request->city,
+                'subcity' => $request->subcity,
+                'address' => $request->address,
+                'bio' => $request->bio,
+                'qualification' => $request->qualification,
+                'degree_photo' => $degreePhotoPath,
+                'degree_verified' => 'pending',
+                'experience_years' => $request->experience_years,
+                'hourly_rate' => $request->hourly_rate,
+                'is_verified' => false,
+            ]
+        );
+        
+        // Delete existing subjects and availability (if any)
+        TutorSubject::where('tutor_id', $tutor->id)->delete();
+        TutorAvailability::where('tutor_id', $tutor->id)->delete();
+        
+        // Create subjects
+        foreach ($request->subjects as $subject) {
+            TutorSubject::create([
+                'tutor_id' => $tutor->id,
+                'subject_name' => $subject['name'],
+                'specialization' => $subject['specialization'] ?? null,
+                'level' => $subject['level'],
+            ]);
+        }
+        
+        // Create availability
+        foreach ($request->availability as $slot) {
+            TutorAvailability::create([
+                'tutor_id' => $tutor->id,
+                'day_of_week' => $slot['day'],
+                'start_time' => $slot['start_time'],
+                'end_time' => $slot['end_time'],
+            ]);
+        }
+        
+        // Update user status to pending_approval
+        $user->status = 'pending_approval';
+        $user->save();
+        
+        DB::commit();
+        
+        // Send notification to admin (optional)
+        $this->notifyAdminForApproval($tutor);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile completed and submitted for admin approval!',
+            'profile_status' => 'pending_approval',
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'status' => $user->status,
+            ],
+            'tutor' => [
+                'id' => $tutor->id,
+                'degree_uploaded' => !empty($degreePhotoPath),
+                'subjects_count' => count($request->subjects),
+                'availability_slots' => count($request->availability),
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        DB::rollBack();
+        
+        // Delete uploaded file if transaction fails
+        if (!empty($degreePhotoPath) && Storage::disk('public')->exists($degreePhotoPath)) {
+            Storage::disk('public')->delete($degreePhotoPath);
+        }
+        
+        Log::error('Profile completion error: ' . $e->getMessage());
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Profile completion failed',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Notify admin about new tutor pending approval
+ */
+private function notifyAdminForApproval($tutor)
+{
+    try {
+        // Get admin users
+        $admins = User::whereIn('role', ['admin', 'super_admin'])->get();
+        
+        foreach ($admins as $admin) {
+            // You can send email or notification here
+            Log::info('Tutor pending approval notification', [
+                'admin_id' => $admin->id,
+                'admin_email' => $admin->email,
+                'tutor_id' => $tutor->id,
+                'tutor_name' => $tutor->user->name ?? 'Unknown',
+            ]);
+        }
+    } catch (\Exception $e) {
+        Log::error('Failed to notify admin: ' . $e->getMessage());
+    }
+}
+
 }
