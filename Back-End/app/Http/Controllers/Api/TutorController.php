@@ -8,6 +8,7 @@ use App\Models\Tutorial;
 use App\Models\TutorialSession;
 use App\Models\Attendance;
 use App\Models\Enrollment;
+use App\Models\TutorialAssignment;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -122,6 +123,12 @@ class TutorController extends Controller
                             'attendance_marked' => $attendanceMarked,
                         ];
                     }),
+                    'pending_assignments' => TutorialAssignment::where('tutor_id', $user->id)
+                        ->where('status', 'pending')
+                        ->count(),
+                    'assigned_tutorials' => TutorialAssignment::where('tutor_id', $user->id)
+                        ->where('status', 'accepted')
+                        ->count(),
                     'recent_students' => $recentStudents,
                     'recent_payments' => [], // You can populate this from your payments table
                     'unread_messages' => 0, // You can calculate this from messages
@@ -380,20 +387,20 @@ public function createTutorial(Request $request)
             'category_id' => 'required|exists:categories,id',
             'level' => 'required|in:beginner,intermediate,advanced',
             'price' => 'required|numeric|min:0',
-            'duration' => 'required|integer|min:1', // Match database column name
+            'duration' => 'required|integer|min:1',
             'image' => 'nullable|string',
-            'learning_objectives' => 'nullable|array', // Match database column name
+            'learning_objectives' => 'nullable|array',
             'requirements' => 'nullable|array',
             'instructor' => 'nullable|string',
             'instructor_bio' => 'nullable|string',
             'lessons' => 'nullable|integer|min:0',
             'includes' => 'nullable|array',
-            'is_published' => 'boolean',
         ]);
 
-        // Create the tutorial - match database column names exactly
+        // Create the tutorial - tutor creates, needs admin approval
         $tutorial = Tutorial::create([
             'tutor_id' => $user->id,
+            'created_by_role' => 'tutor',
             'title' => $validated['title'],
             'description' => $validated['description'],
             'category_id' => $validated['category_id'],
@@ -405,18 +412,19 @@ public function createTutorial(Request $request)
             'requirements' => $validated['requirements'] ?? [],
             'instructor' => $validated['instructor'] ?? $user->name,
             'instructor_bio' => $validated['instructor_bio'] ?? '',
-            'instructor_experience' => '', // Add if needed
+            'instructor_experience' => '',
             'lessons' => $validated['lessons'] ?? 0,
             'includes' => $validated['includes'] ?? [],
-            'is_published' => $validated['is_published'] ?? false,
-            'students' => 0, // Default values
+            'is_published' => false, // Not published until approved
+            'status' => 'pending_approval', // Needs admin approval
+            'enrollment_count' => 0,
             'rating' => 0,
-            'content' => '' // Empty default
+            'content' => ''
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Tutorial created successfully',
+            'message' => 'Tutorial created successfully. Waiting for admin approval.',
             'tutorial' => $tutorial
         ], 201);
 
@@ -870,5 +878,194 @@ public function getStudentAttendance($studentId)
             'error' => $e->getMessage()
         ], 500);
     }
+}
+
+// In TutorController.php
+
+/**
+ * Get assignments for current tutor
+ */
+public function getAssignments(Request $request)
+{
+    $user = Auth::user();
+    
+    $assignments = TutorialAssignment::with(['tutorial', 'tutorial.category', 'assignedBy'])
+        ->where('tutor_id', $user->id)
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'assignments' => $assignments
+    ]);
+}
+
+public function acceptAssignment(Request $request, $assignmentId)
+{
+    $user = Auth::user();
+    
+    $assignment = TutorialAssignment::where('id', $assignmentId)
+        ->where('tutor_id', $user->id)
+        ->where('status', 'pending')  // ← MUST BE PENDING
+        ->firstOrFail();
+    
+    $assignment->accept();
+    
+    // ✅ FIX: Update tutorial status to 'in_progress'
+    $assignment->tutorial->update([
+        'status' => 'in_progress', // NOT 'approved'
+        'tutor_id' => $user->id
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Assignment accepted successfully',
+        'assignment' => $assignment->load(['tutorial', 'assignedBy'])
+    ]);
+}
+
+/**
+ * Reject an assignment
+ */
+public function rejectAssignment(Request $request, $assignmentId)
+{
+    $user = Auth::user();
+    
+    $assignment = TutorialAssignment::where('id', $assignmentId)
+        ->where('tutor_id', $user->id)
+        ->where('status', 'pending')
+        ->firstOrFail();
+    
+    $assignment->reject($request->reason);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Assignment rejected',
+        'assignment' => $assignment
+    ]);
+}
+
+/**
+ * Get assigned tutorials (accepted assignments)
+ */
+public function getAssignedTutorials(Request $request)
+{
+    $user = Auth::user();
+    
+    $tutorials = $user->assignedTutorials()
+        ->wherePivot('status', 'accepted')
+        ->with(['category', 'lessons'])
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'tutorials' => $tutorials
+    ]);
+}
+
+/**
+ * Get tutorial creation statistics
+ */
+public function getTutorialStats(Request $request)
+{
+    $user = Auth::user();
+    
+    $stats = [
+        'total_created' => $user->createdTutorials()->count(),
+        'total_assigned' => $user->assignedTutorials()->count(),
+        'pending_assignments' => $user->tutorialAssignments()->where('status', 'pending')->count(),
+        'published_tutorials' => $user->createdTutorials()->where('status', 'published')->count(),
+        'pending_approval' => $user->createdTutorials()->where('status', 'pending_approval')->count(),
+    ];
+    
+    return response()->json([
+        'success' => true,
+        'stats' => $stats
+    ]);
+}
+
+/**
+ * Get pending assignments for current tutor
+ */
+public function getPendingAssignments(Request $request)
+{
+    $user = Auth::user();
+    
+    $assignments = TutorialAssignment::with(['tutorial', 'tutorial.category', 'assignedBy'])
+        ->where('tutor_id', $user->id)
+        ->where('status', 'pending')
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'assignments' => $assignments
+    ]);
+}
+
+/**
+ * Submit tutorial for admin review (when tutor completes content)
+ */
+public function submitForReview(Request $request, $tutorialId)
+{
+    $user = Auth::user();
+    
+    $tutorial = Tutorial::where('id', $tutorialId)
+        ->where('tutor_id', $user->id)
+        ->firstOrFail();
+    
+    // Check if tutorial is in progress
+    if ($tutorial->status !== 'in_progress') {
+        return response()->json([
+            'success' => false,
+            'message' => 'Tutorial must be in progress to submit for review'
+        ], 422);
+    }
+    
+    $tutorial->update([
+        'status' => 'pending_review'
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial submitted for admin review',
+        'tutorial' => $tutorial
+    ]);
+}
+
+/**
+ * Mark tutorial as completed (for assigned tutorials)
+ */
+public function markAsCompleted(Request $request, $tutorialId)
+{
+    $user = Auth::user();
+    
+    $tutorial = Tutorial::where('id', $tutorialId)
+        ->where('tutor_id', $user->id)
+        ->firstOrFail();
+    
+    // Check if tutorial is assigned to this tutor
+    $assignment = TutorialAssignment::where('tutorial_id', $tutorialId)
+        ->where('tutor_id', $user->id)
+        ->where('status', 'accepted')
+        ->first();
+    
+    if (!$assignment) {
+        return response()->json([
+            'success' => false,
+            'message' => 'You are not assigned to this tutorial'
+        ], 403);
+    }
+    
+    $tutorial->update([
+        'status' => 'completed'
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial marked as completed',
+        'tutorial' => $tutorial
+    ]);
 }
 }

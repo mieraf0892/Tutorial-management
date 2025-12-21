@@ -16,5 +16,30 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/classes/{class}/students', [AdminController::class, 'getClassStudents']);
         Route::post('/classes/{class}/enroll', [AdminController::class, 'enrollStudent']);
         Route::delete('/classes/{class}/students/{student}', [AdminController::class, 'removeStudent']);
+        
+        // ==============================
+        // NEW: Tutorial Approval Workflow
+        // ==============================
+        
+        // Get tutorials pending approval (created by tutors)
+        Route::get('/tutorials/pending-approval', [AdminController::class, 'getPendingTutorials']);
+        
+        // Approve a tutor-created tutorial
+        Route::post('/tutorials/{tutorial}/approve', [AdminController::class, 'approveTutorial']);
+        
+        // Reject a tutor-created tutorial
+        Route::post('/tutorials/{tutorial}/reject', [AdminController::class, 'rejectTutorial']);
+        
+        // Publish a tutorial (make visible to students)
+        Route::post('/tutorials/{tutorial}/publish', [AdminController::class, 'publishTutorial']);
+        
+        // Archive a tutorial
+        Route::post('/tutorials/{tutorial}/archive', [AdminController::class, 'archiveTutorial']);
+        
+        // Get all assignments (admin view)
+        Route::get('/assignments', [AdminController::class, 'getAssignments']);
+        
+        // Assign tutor to existing tutorial
+        Route::post('/tutorials/{tutorial}/assign', [AdminController::class, 'assignTutor']);
     });
 });

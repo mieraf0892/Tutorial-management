@@ -16,6 +16,7 @@ import Student from "./pages/StudentDashboard";
 import Admin from "./pages/AdminDashboard";
 import SuperAdmin from "./pages/SuperAdminDashboard";
 import Login from "./pages/Login";
+import PaymentCallback from "./pages/PaymentCallback";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
 import TutorProfilePage from "./pages/TutorProfilePage";
@@ -48,6 +49,49 @@ const AppContent = () => {
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<Home />} />
+            <Route path="/tutorial/:id" element={<TutorialDetail />} />
+            <Route path="/categories" element={<Categories />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/payment/callback" element={<PaymentCallback />} />
+            <Route path="/tutor/profile" element={<TutorProfilePage />} />
+            <Route path="/student/profile" element={<StudentProfile />} />
+            <Route path="/registration-pending" element={<RegistrationPending />} />
+            
+            {/* Student dashboard with learning routes */}
+            <Route 
+              path="/student/learn/:courseId/lesson/:lessonId" 
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <Student />
+                </ProtectedRoute>
+              } 
+            />
+            
+            {/* Student Dashboard with Learning Mode */}
+  <Route 
+    path="/student" 
+    element={
+      <ProtectedRoute requiredRole="student">
+        <Student />
+      </ProtectedRoute>
+    } 
+  />
+  
+  {/* Student Learning Route - This handles lesson URLs */}
+  <Route 
+    path="/student/learn/:courseId/lesson/:lessonId" 
+    element={
+      <ProtectedRoute requiredRole="student">
+        <Student />
+      </ProtectedRoute>
+    } 
+  />
+            
+            
+            
+            {/* Protected Routes */}
             <Route 
               path="/tutorials" 
               element={
@@ -56,14 +100,6 @@ const AppContent = () => {
                 </ProtectedRoute>
               } 
             />
-            <Route path="/tutorial/:id" element={<TutorialDetail />} />
-            <Route path="/categories" element={<Categories />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/tutor/profile" element={<TutorProfilePage />} />
-            <Route path="/student/profile" element={<StudentProfile />} />
-            <Route path="/registration-pending" element={<RegistrationPending />} />
             
             {/* Protected Dashboard Routes */}
             <Route 
@@ -103,14 +139,8 @@ const AppContent = () => {
                 </ProtectedRoute>
               } 
             />
-            <Route 
-              path="/student" 
-              element={
-                <ProtectedRoute requiredRole="student">
-                  <Student />
-                </ProtectedRoute>
-              } 
-            />
+            
+            {/* Catch-all route for 404 */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </div>

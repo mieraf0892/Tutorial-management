@@ -15,9 +15,12 @@ import {
   CheckCircle2,
   ArrowLeft,
   Lock,
+  AlertCircle,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Lesson {
   id: number;
@@ -47,6 +50,8 @@ interface TutorialDetail {
   id: number;
   title: string;
   description: string;
+  short_description: string;
+  preview_description: string;
   category: Category;
   duration: string;
   students: number;
@@ -58,8 +63,14 @@ interface TutorialDetail {
   instructor_experience: string;
   lessons: Lesson[];
   total_lessons: number;
+  preview_lessons?: number;
   price: number;
+  is_free: boolean;
   is_published: boolean;
+  has_preview: boolean;
+  has_access: boolean;
+  has_full_access: boolean;
+  preview_video_url: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   learning_objectives: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,16 +106,11 @@ const TutorialDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   
   const [tutorial, setTutorial] = useState<TutorialDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  // Check authentication status
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsAuthenticated(!!token);
-  }, []);
+  const [enrolling, setEnrolling] = useState(false);
 
   // Fetch tutorial details
   const fetchTutorialDetail = async () => {
@@ -119,6 +125,14 @@ const TutorialDetail = () => {
       
       if (data.success && data.tutorial) {
         console.log('✅ Tutorial data received:', data.tutorial);
+        console.log('🔐 Access info:', {
+          has_access: data.tutorial.has_access,
+          has_full_access: data.tutorial.has_full_access,
+          is_enrolled: data.tutorial.is_enrolled,
+          is_free: data.tutorial.is_free,
+          preview_lessons: data.tutorial.preview_lessons,
+          total_lessons: data.tutorial.total_lessons
+        });
         setTutorial(data.tutorial);
       } else {
         throw new Error(data.message || 'Failed to fetch tutorial');
@@ -127,7 +141,6 @@ const TutorialDetail = () => {
     } catch (error: any) {
       console.error('❌ Error fetching tutorial:', error);
       
-      // Handle different error types
       if (error.response?.data) {
         toast({
           title: "Error",
@@ -155,49 +168,73 @@ const TutorialDetail = () => {
   // Debug: Log tutorial data when it changes
   useEffect(() => {
     if (tutorial) {
-      console.log('🎯 Current tutorial state:', tutorial);
-      console.log('📚 Learning objectives:', tutorial.learning_objectives);
-      console.log('📦 Includes:', tutorial.includes);
+      console.log('🎯 Current tutorial state:', {
+        ...tutorial,
+        lessons_count: tutorial.lessons?.length || 0,
+        access_status: {
+          has_access: tutorial.has_access,
+          has_full_access: tutorial.has_full_access,
+          is_enrolled: tutorial.is_enrolled,
+          is_free: tutorial.is_free,
+          preview_lessons: tutorial.preview_lessons,
+          total_lessons: tutorial.total_lessons
+        }
+      });
     }
   }, [tutorial]);
 
   const handleStartLearning = () => {
-    if (!isAuthenticated) {
+    if (!user) {
       toast({
-        title: "Authentication Required",
+        title: "Login Required",
         description: "Please log in to access this tutorial",
         variant: "destructive"
       });
-      navigate('/login', { state: { returnUrl: `/tutorials/${id}` } });
+      navigate('/login', { state: { returnUrl: `/tutorial/${id}` } });
       return;
     }
 
+    // If free tutorial or already has full access, start learning
+    if (tutorial?.is_free || tutorial?.has_full_access) {
+      const firstAvailableLesson = tutorial.lessons?.find(lesson => 
+        !lesson.is_locked || lesson.is_preview
+      );
+      
+      if (firstAvailableLesson) {
+        navigate(`/tutorial/${id}/lesson/${firstAvailableLesson.id}`);
+      } else {
+        toast({
+          title: "No lessons available",
+          description: "All lessons are currently locked",
+          variant: "destructive"
+        });
+      }
+      return;
+    }
+
+    // If not enrolled, show enroll option
     if (!tutorial?.is_enrolled) {
       handleEnroll();
       return;
-    }
-
-    // Navigate to first available lesson
-    const firstAvailableLesson = tutorial.lessons?.find(lesson => 
-      !lesson.is_locked || lesson.is_preview
-    );
-    
-    if (firstAvailableLesson) {
-      navigate(`/tutorials/${id}/lessons/${firstAvailableLesson.id}`);
-    } else {
-      toast({
-        title: "No lessons available",
-        description: "All lessons are currently locked",
-        variant: "destructive"
-      });
     }
   };
 
   const handleEnroll = async () => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        navigate('/login', { state: { returnUrl: `/tutorials/${id}` } });
+      setEnrolling(true);
+      
+      if (!user) {
+        navigate('/login', { state: { returnUrl: `/tutorial/${id}` } });
+        return;
+      }
+
+      // For free tutorials, no enrollment needed
+      if (tutorial?.is_free) {
+        toast({
+          title: "Free Tutorial",
+          description: "This tutorial is free! You can start learning immediately.",
+        });
+        fetchTutorialDetail(); // Refresh to update access
         return;
       }
 
@@ -218,7 +255,6 @@ const TutorialDetail = () => {
     } catch (error: any) {
       console.error('Error enrolling:', error);
       
-      // Handle different error types
       if (error.response?.data) {
         toast({
           title: "Error",
@@ -232,11 +268,59 @@ const TutorialDetail = () => {
           variant: "destructive"
         });
       }
+    } finally {
+      setEnrolling(false);
     }
   };
 
   const handleLessonClick = (lesson: Lesson) => {
-    if (lesson.is_locked && !lesson.is_preview) {
+    // If user is not logged in
+    if (!user) {
+      toast({
+        title: "Login Required",
+        description: "Please log in to access this lesson",
+        variant: "destructive"
+      });
+      navigate('/login', { state: { returnUrl: `/tutorial/${id}` } });
+      return;
+    }
+
+    // Check if user has access to this lesson
+    const hasLessonAccess = tutorial?.has_access || 
+                           (lesson.is_preview && tutorial?.has_preview);
+
+    if (!hasLessonAccess) {
+      // If it's a preview lesson but user needs to enroll for more
+      if (lesson.is_preview && tutorial?.preview_lessons && 
+          tutorial.lessons?.indexOf(lesson) >= (tutorial.preview_lessons || 0)) {
+        toast({
+          title: "Enroll to Continue",
+          description: "Enroll in this tutorial to access all lessons",
+          variant: "default",
+          action: (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => handleEnroll()}
+            >
+              Enroll Now
+            </Button>
+          )
+        });
+        return;
+      }
+
+      // General access denied
+      toast({
+        title: "Access Denied",
+        description: "Please enroll in this tutorial to access the lessons",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if lesson is locked (for enrolled users)
+    if (lesson.is_locked && !lesson.is_preview && tutorial?.is_enrolled) {
       toast({
         title: "Lesson Locked",
         description: "Please complete previous lessons first",
@@ -245,26 +329,37 @@ const TutorialDetail = () => {
       return;
     }
 
-    if (!isAuthenticated) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to access this lesson",
-        variant: "destructive"
-      });
-      navigate('/login', { state: { returnUrl: `/tutorials/${id}/lessons/${lesson.id}` } });
-      return;
-    }
+    // Navigate to lesson
+    navigate(`/tutorial/${id}/lesson/${lesson.id}`);
+  };
 
-    if (!tutorial?.is_enrolled) {
-      toast({
-        title: "Enrollment Required",
-        description: "Please enroll in this tutorial first",
-        variant: "destructive"
-      });
-      return;
+  const getButtonText = () => {
+    if (!user) {
+      return "Login to Start Learning";
     }
+    
+    if (tutorial?.is_free) {
+      return tutorial.has_access ? "Start Learning" : "Get Free Access";
+    }
+    
+    if (tutorial?.has_full_access) {
+      return "Continue Learning";
+    }
+    
+    if (tutorial?.is_enrolled) {
+      return "Continue Learning";
+    }
+    
+    return tutorial?.price > 0 
+      ? `Enroll Now - $${tutorial.price}` 
+      : "Enroll for Free";
+  };
 
-    navigate(`/tutorials/${id}/lessons/${lesson.id}`);
+  const getButtonVariant = () => {
+    if (!user || (!tutorial?.has_access && !tutorial?.is_free)) {
+      return "default";
+    }
+    return "default";
   };
 
   if (loading) {
@@ -290,7 +385,7 @@ const TutorialDetail = () => {
             <h1 className="text-4xl font-bold mb-4">Tutorial Not Found</h1>
             <p className="text-muted-foreground mb-4">Tutorial with ID {id} was not found.</p>
             <Button asChild>
-              <Link to="/tutorials">Browse Tutorials</Link>
+              <Link to="/">Browse Tutorials</Link>
             </Button>
           </div>
         </div>
@@ -299,17 +394,18 @@ const TutorialDetail = () => {
     );
   }
 
-  // Safe data conversion - this is crucial!
+  // Safe data conversion
   const learningObjectives = safeArray(tutorial.learning_objectives);
   const includes = safeArray(tutorial.includes);
   const lessons = Array.isArray(tutorial.lessons) ? tutorial.lessons : [];
   const categoryName = tutorial.category?.name || 'Uncategorized';
   const instructorBio = safeString(tutorial.instructor_bio, 'Expert instructor with years of experience');
   const instructorExperience = safeString(tutorial.instructor_experience, '10+ years experience');
-
-  console.log('🛡️ Safe data - Learning objectives:', learningObjectives);
-  console.log('🛡️ Safe data - Includes:', includes);
-  console.log('🛡️ Safe data - Lessons count:', lessons.length);
+  
+  // Calculate preview lessons
+  const previewLessonsCount = tutorial.preview_lessons || (tutorial.has_preview ? 2 : 0);
+  const isPreviewMode = !tutorial.has_full_access && previewLessonsCount > 0;
+  const showPreviewWarning = isPreviewMode && lessons.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -318,9 +414,9 @@ const TutorialDetail = () => {
       <div className="bg-gradient-soft py-8 border-b">
         <div className="container mx-auto px-4">
           <Button variant="ghost" size="sm" asChild className="mb-4">
-            <Link to="/tutorials">
+            <Link to="/">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Tutorials
+              Back to Home
             </Link>
           </Button>
         </div>
@@ -329,26 +425,80 @@ const TutorialDetail = () => {
       <div className="container mx-auto px-4 py-12">
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
+            {/* Preview Mode Banner */}
+            {showPreviewWarning && (
+              <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+                <CardContent className="p-4 flex items-start gap-3">
+                  <Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-amber-800 dark:text-amber-300">
+                      Preview Mode
+                    </h3>
+                    <p className="text-sm text-amber-700 dark:text-amber-400">
+                      You're viewing {previewLessonsCount} of {tutorial.total_lessons} lessons. 
+                      {tutorial.is_free ? (
+                        " This is a free tutorial - you have full access!"
+                      ) : (
+                        " Enroll to unlock all lessons and get full access."
+                      )}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div>
               <div className="flex items-center gap-3 mb-4">
                 <Badge variant="outline">{categoryName}</Badge>
                 <Badge>{tutorial.level}</Badge>
+                {tutorial.is_free && (
+                  <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                    Free
+                  </Badge>
+                )}
+                {isPreviewMode && (
+                  <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-400">
+                    Preview Available
+                  </Badge>
+                )}
               </div>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
                 {tutorial.title}
               </h1>
               <p className="text-lg text-muted-foreground">
-                {tutorial.description}
+                {isPreviewMode ? tutorial.preview_description : tutorial.description}
               </p>
             </div>
 
-            <div className="rounded-xl overflow-hidden border shadow-elegant">
-              <img
-                src={tutorial.image}
-                alt={tutorial.title}
-                className="w-full aspect-video object-cover"
-              />
-            </div>
+            {/* Preview Video (if available) */}
+            {tutorial.preview_video_url && (
+              <div className="rounded-xl overflow-hidden border shadow-elegant">
+                <div className="aspect-video bg-black">
+                  <video 
+                    src={tutorial.preview_video_url}
+                    controls
+                    className="w-full h-full"
+                    poster={tutorial.image}
+                  />
+                </div>
+                <div className="p-4 bg-muted/50">
+                  <p className="text-sm text-muted-foreground">
+                    Preview video - {tutorial.is_free ? 'Full tutorial is free!' : 'Enroll to watch all videos'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Tutorial Image (fallback if no video) */}
+            {!tutorial.preview_video_url && (
+              <div className="rounded-xl overflow-hidden border shadow-elegant">
+                <img
+                  src={tutorial.image}
+                  alt={tutorial.title}
+                  className="w-full aspect-video object-cover"
+                />
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-6 py-4">
               <div className="flex items-center gap-2">
@@ -367,11 +517,14 @@ const TutorialDetail = () => {
               </div>
               <div className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-muted-foreground" />
-                <span className="font-medium">{tutorial.total_lessons} lessons</span>
+                <span className="font-medium">
+                  {tutorial.total_lessons} lessons
+                  {isPreviewMode && ` (${previewLessonsCount} preview)`}
+                </span>
               </div>
             </div>
 
-            {/* What You'll Learn Section - SAFE */}
+            {/* What You'll Learn Section */}
             <Card>
               <CardContent className="p-6">
                 <h2 className="text-2xl font-bold mb-4">What You'll Learn</h2>
@@ -384,7 +537,6 @@ const TutorialDetail = () => {
                       </div>
                     ))
                   ) : (
-                    // Fallback content
                     <>
                       <div className="flex items-start gap-2">
                         <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
@@ -408,63 +560,105 @@ const TutorialDetail = () => {
               </CardContent>
             </Card>
 
-            {/* Course Content Section - SAFE */}
+            {/* Course Content Section */}
             <Card>
               <CardContent className="p-6">
-                <h2 className="text-2xl font-bold mb-4">Course Content</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-2xl font-bold">Course Content</h2>
+                  {isPreviewMode && (
+                    <Badge variant="outline" className="text-amber-700 dark:text-amber-400">
+                      {previewLessonsCount} of {tutorial.total_lessons} lessons preview
+                    </Badge>
+                  )}
+                </div>
+                
                 <div className="space-y-3">
                   {lessons.length > 0 ? (
-                    lessons.map((lesson) => (
-                      <div
-                        key={lesson.id}
-                        className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
-                          (lesson.is_locked && !lesson.is_preview) || !isAuthenticated || !tutorial.is_enrolled
-                            ? 'opacity-60 cursor-not-allowed'
-                            : 'cursor-pointer hover:border-primary'
-                        }`}
-                        onClick={() => handleLessonClick(lesson)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                            (lesson.is_locked && !lesson.is_preview) || !isAuthenticated || !tutorial.is_enrolled
-                              ? 'bg-muted' 
-                              : 'bg-primary/10'
-                          }`}>
-                            {(lesson.is_locked && !lesson.is_preview) || !isAuthenticated || !tutorial.is_enrolled ? (
-                              <Lock className="h-5 w-5 text-muted-foreground" />
-                            ) : (
-                              <PlayCircle className="h-5 w-5 text-primary" />
+                    lessons.map((lesson, index) => {
+                      const isPreviewLesson = index < previewLessonsCount;
+                      const hasAccessToThisLesson = tutorial.has_full_access || 
+                                                   (isPreviewLesson && tutorial.has_preview);
+                      
+                      return (
+                        <div
+                          key={lesson.id}
+                          className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
+                            !hasAccessToThisLesson
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'cursor-pointer hover:border-primary'
+                          }`}
+                          onClick={() => hasAccessToThisLesson && handleLessonClick(lesson)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
+                              !hasAccessToThisLesson
+                                ? 'bg-muted' 
+                                : 'bg-primary/10'
+                            }`}>
+                              {!hasAccessToThisLesson ? (
+                                <Lock className="h-5 w-5 text-muted-foreground" />
+                              ) : (
+                                <PlayCircle className="h-5 w-5 text-primary" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-medium">
+                                {lesson.title}
+                                {isPreviewLesson && !tutorial.has_full_access && (
+                                  <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">
+                                    (Preview)
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                {lesson.duration}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isPreviewLesson && !tutorial.has_full_access && (
+                              <Badge variant="secondary">Preview</Badge>
+                            )}
+                            {!hasAccessToThisLesson && (
+                              <Badge variant="outline">Locked</Badge>
                             )}
                           </div>
-                          <div>
-                            <div className="font-medium">
-                              {lesson.title}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {lesson.duration}
-                            </div>
-                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {lesson.is_preview && (
-                            <Badge variant="secondary">Preview</Badge>
-                          )}
-                          {(lesson.is_locked && !lesson.is_preview) && (
-                            <Badge variant="outline">Locked</Badge>
-                          )}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       No lessons available for this tutorial yet.
                     </div>
                   )}
                 </div>
+
+                {/* Enrollment CTA for preview mode */}
+                {isPreviewMode && lessons.length > 0 && (
+                  <div className="mt-6 p-4 border rounded-lg bg-linear-to-r from-primary/5 to-primary/10">
+                    <div className="flex items-center gap-3 mb-2">
+                      <AlertCircle className="h-5 w-5 text-primary" />
+                      <h3 className="font-semibold">Want to see all {tutorial.total_lessons} lessons?</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Enroll now to get full access to all lessons, exercises, and certificate.
+                    </p>
+                    <Button 
+                      onClick={handleEnroll}
+                      disabled={enrolling || !user}
+                      className="w-full"
+                    >
+                      {enrolling ? 'Enrolling...' : 
+                       !user ? 'Login to Enroll' : 
+                       tutorial.is_free ? 'Get Free Access' : 
+                       tutorial.price > 0 ? `Enroll Now - $${tutorial.price}` : 'Enroll for Free'}
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* Instructor Section - SAFE */}
+            {/* Instructor Section */}
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
@@ -487,6 +681,7 @@ const TutorialDetail = () => {
             </Card>
           </div>
 
+          {/* Sidebar - Enrollment Card */}
           <div className="lg:col-span-1">
             <Card className="sticky top-20">
               <CardContent className="p-6">
@@ -508,21 +703,32 @@ const TutorialDetail = () => {
                     </div>
                   )}
 
+                  {/* Access Status */}
+                  <div className="space-y-2">
+                    {tutorial.has_full_access ? (
+                      <Badge className="w-full justify-center bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                        ✓ Full Access Granted
+                      </Badge>
+                    ) : tutorial.is_free ? (
+                      <Badge className="w-full justify-center bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">
+                        🎉 Free Tutorial
+                      </Badge>
+                    ) : isPreviewMode ? (
+                      <Badge variant="outline" className="w-full justify-center border-amber-300 text-amber-700 dark:text-amber-400">
+                        👁️ Preview Mode
+                      </Badge>
+                    ) : null}
+                  </div>
+
                   <Button
                     size="lg"
-                    variant="default"
+                    variant={getButtonVariant()}
                     className="w-full"
                     onClick={handleStartLearning}
-                    disabled={!tutorial.is_published}
+                    disabled={!tutorial.is_published || enrolling}
                   >
                     <PlayCircle className="mr-2 h-5 w-5" />
-                    {!isAuthenticated 
-                      ? "Login to Enroll" 
-                      : tutorial.is_enrolled 
-                        ? "Continue Learning" 
-                        : tutorial.price > 0 
-                          ? `Enroll Now - $${tutorial.price}`
-                          : "Enroll for Free"}
+                    {enrolling ? 'Processing...' : getButtonText()}
                   </Button>
 
                   {!tutorial.is_published && (
@@ -531,7 +737,7 @@ const TutorialDetail = () => {
                     </div>
                   )}
 
-                  {/* Includes Section - SAFE */}
+                  {/* Includes Section */}
                   <div className="space-y-3 pt-4 border-t">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">
@@ -547,7 +753,6 @@ const TutorialDetail = () => {
                           </div>
                         ))
                       ) : (
-                        // Fallback content
                         <>
                           <div className="flex items-center gap-2 text-sm">
                             <CheckCircle2 className="h-4 w-4 text-muted-foreground" />

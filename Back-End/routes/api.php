@@ -17,9 +17,14 @@ require __DIR__ . '/api/auth.php';
 // ============================
 
 Route::middleware(['auth:sanctum'])->group(function () {
+
+    require __DIR__ . '/api/payments/chapa.php';
     
     // Common authenticated user routes
     require __DIR__ . '/api/shared/user.php';
+    require __DIR__ . '/api/shared/lessons.php';
+    // In your main api.php, inside the auth:sanctum middleware group
+    require __DIR__ . '/api/shared/profile.php';
     
     // Student routes (only these are created so far)
     require __DIR__ . '/api/student/dashboard.php';
@@ -54,6 +59,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     require __DIR__ . '/api/admin/attendance.php';
     require __DIR__ . '/api/admin/communication.php';
     require __DIR__ . '/api/admin/tutor_approvals.php';
+    require __DIR__ . '/api/admin/email_queue.php';
     
     // TEMPORARY: Comment out other routes until we create them
     /*
