@@ -14,7 +14,8 @@ interface TutorialCardProps {
   description: string;
   category: string;
   duration: string;
-  students: number;
+  students?: number; // Make optional
+  enrollment_count?: number; // Add new field
   rating: number;
   level: "Beginner" | "Intermediate" | "Advanced";
   image: string;
@@ -27,6 +28,7 @@ const TutorialCard = ({
   category,
   duration,
   students,
+  enrollment_count, // New prop
   rating,
   level,
   image,
@@ -34,6 +36,11 @@ const TutorialCard = ({
   const [isEnrolling, setIsEnrolling] = useState(false);
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
+
+  // Calculate students count - handle both old and new field names
+  const studentCount = enrollment_count !== undefined 
+    ? enrollment_count 
+    : (students !== undefined ? students : 0);
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -142,7 +149,7 @@ const TutorialCard = ({
             </div>
             <div className="flex items-center gap-1">
               <Users className="h-4 w-4" />
-              <span>{students.toLocaleString()}</span>
+              <span>{studentCount.toLocaleString()}</span>
             </div>
           </div>
           <div className="flex items-center gap-1 font-medium text-primary">
