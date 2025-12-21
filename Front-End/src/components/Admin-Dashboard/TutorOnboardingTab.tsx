@@ -10,31 +10,62 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Check, X, Clock, User, GraduationCap, Briefcase, RefreshCw, Mail, Phone, MapPin, Eye, FileImage, AlertCircle } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
-interface PendingTutor {
+interface TutorSubject {
+  id: number;
+  tutor_id: number;
+  subject_name: string;
+  specialization?: string;
+  level: string;
+}
+
+interface TutorAvailability {
+  id: number;
+  tutor_id: number;
+  day_of_week: string;
+  start_time: string;
+  end_time: string;
+}
+
+interface TutorDetails {
   id: number;
   user_id: number;
-  name: string;
-  email: string;
-  qualification: string;
-  experience_years: number;
-  subjects: string[];
-  submitted_at: string;
-  status: string;
-  phone?: string;
+  phone: string;
   age?: number;
+  sex?: string;
   country?: string;
   city?: string;
-  bio?: string;
-  hourly_rate?: number;
+  subcity?: string;
   address?: string;
+  bio?: string;
+  qualification: string;
   degree_photo?: string;
   degree_photo_url?: string;
   degree_verified?: 'pending' | 'approved' | 'rejected';
+  experience_years: number;
+  hourly_rate: number;
+  is_verified: boolean;
   rejection_reason?: string;
+  subjects: TutorSubject[];
+  availability: TutorAvailability[];
+}
+
+interface PendingTutor {
+  // User fields
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  status: string;
+  created_at: string;
+  email_verified_at: string;
+  role: string;
+  
+  // Tutor object (nested)
+  tutor?: TutorDetails;
 }
 
 interface TutorOnboardingTabProps {
-  pendingTutors: PendingTutor[];
+  pendingTutors: PendingTutor[] | any;
   onApproveTutor: (tutorId: number) => void;
   onRejectTutor: (tutorId: number, rejectionReason: string) => void;
   onRefresh?: () => void;
@@ -62,6 +93,7 @@ export default function TutorOnboardingTab({
     approved: 0,
     rejected: 0
   });
+  const tutors = Array.isArray(pendingTutors) ? pendingTutors : []; 
 
   // Calculate degree verification stats
   useEffect(() => {
@@ -71,14 +103,14 @@ export default function TutorOnboardingTab({
       rejected: 0
     };
 
-    pendingTutors.forEach(tutor => {
-      if (tutor.degree_verified === 'pending') stats.pending++;
-      else if (tutor.degree_verified === 'approved') stats.approved++;
-      else if (tutor.degree_verified === 'rejected') stats.rejected++;
+    tutors.forEach(tutor => {
+      if (tutor.tutor?.degree_verified === 'pending') stats.pending++;
+      else if (tutor.tutor?.degree_verified === 'approved') stats.approved++;
+      else if (tutor.tutor?.degree_verified === 'rejected') stats.rejected++;
     });
 
     setDegreeStats(stats);
-  }, [pendingTutors]);
+  }, [tutors]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -111,8 +143,7 @@ export default function TutorOnboardingTab({
   };
 
   const handleViewDegreePhoto = async (tutor: PendingTutor) => {
-    if (!tutor.degree_photo) {
-      // Show error toast
+    if (!tutor.tutor?.degree_photo_url && !tutor.tutor?.degree_photo) {
       alert("No degree photo uploaded for this tutor");
       return;
     }
@@ -120,16 +151,13 @@ export default function TutorOnboardingTab({
     try {
       setLoadingDegreePhoto(true);
       
-      // Fetch the degree photo
-      const response = await apiClient.get(`/tutors/${tutor.id}/degree-photo`, {
-        responseType: 'blob'
-      });
-
-      // Create object URL from blob
-      const blob = new Blob([response.data], { type: response.headers['content-type'] });
-      const url = URL.createObjectURL(blob);
-      setDegreePhotoUrl(url);
+      // Use the degree_photo_url directly from the API response
+      const photoUrl = tutor.tutor?.degree_photo_url || 
+        `http://localhost:8000/storage/${tutor.tutor?.degree_photo}`;
+      
+      setDegreePhotoUrl(photoUrl);
       setDegreePhotoDialogOpen(true);
+      
     } catch (error) {
       console.error('Error loading degree photo:', error);
       alert("Failed to load degree photo. Please try again.");
@@ -202,10 +230,10 @@ export default function TutorOnboardingTab({
   };
 
   const filteredTutors = activeTab === "pending" 
-    ? pendingTutors.filter(t => !t.degree_verified || t.degree_verified === 'pending')
-    : pendingTutors;
+    ? tutors.filter(t => !t.tutor?.degree_verified || t.tutor?.degree_verified === 'pending')
+    : tutors;
 
-  if (pendingTutors.length === 0) {
+  if (tutors.length === 0) {
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -336,9 +364,9 @@ export default function TutorOnboardingTab({
           <Card 
             key={tutor.id} 
             className={`border-l-4 ${
-              tutor.degree_verified === 'approved' 
+              tutor.tutor?.degree_verified === 'approved' 
                 ? 'border-l-green-500 dark:border-l-green-400' 
-                : tutor.degree_verified === 'rejected'
+                : tutor.tutor?.degree_verified === 'rejected'
                 ? 'border-l-red-500 dark:border-l-red-400'
                 : 'border-l-orange-500 dark:border-l-orange-400'
             } bg-card border-border`}
@@ -351,7 +379,7 @@ export default function TutorOnboardingTab({
                     {tutor.name}
                     {showDegreeVerification && (
                       <span className="ml-2">
-                        {getDegreeStatusBadge(tutor.degree_verified)}
+                        {getDegreeStatusBadge(tutor.tutor?.degree_verified)}
                       </span>
                     )}
                   </CardTitle>
@@ -369,7 +397,7 @@ export default function TutorOnboardingTab({
                   </CardDescription>
                 </div>
                 <div className="text-sm text-muted-foreground sm:text-right">
-                  Applied {formatDate(tutor.submitted_at)}
+                  Applied {formatDate(tutor.created_at)}
                 </div>
               </div>
             </CardHeader>
@@ -378,24 +406,24 @@ export default function TutorOnboardingTab({
                 <div className="flex items-center gap-2">
                   <GraduationCap className="w-4 h-4 text-blue-500 dark:text-blue-400" />
                   <span className="text-sm font-medium text-foreground">Qualification:</span>
-                  <span className="text-sm text-muted-foreground">{tutor.qualification}</span>
+                  <span className="text-sm text-muted-foreground">{tutor.tutor?.qualification || 'Not specified'}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Briefcase className="w-4 h-4 text-green-500 dark:text-green-400" />
                   <span className="text-sm font-medium text-foreground">Experience:</span>
-                  <span className="text-sm text-muted-foreground">{tutor.experience_years} years</span>
+                  <span className="text-sm text-muted-foreground">{tutor.tutor?.experience_years || 0} years</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-purple-500 dark:text-purple-400" />
                   <span className="text-sm font-medium text-foreground">Location:</span>
                   <span className="text-sm text-muted-foreground">
-                    {tutor.city && tutor.country ? `${tutor.city}, ${tutor.country}` : 'Not specified'}
+                    {tutor.tutor?.city && tutor.tutor?.country ? `${tutor.tutor.city}, ${tutor.tutor.country}` : 'Not specified'}
                   </span>
                 </div>
               </div>
 
               {/* Degree Photo Section */}
-              {showDegreeVerification && tutor.degree_photo && (
+              {showDegreeVerification && tutor.tutor?.degree_photo && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-medium text-foreground">Degree Certificate</Label>
@@ -410,7 +438,7 @@ export default function TutorOnboardingTab({
                         <Eye className="w-3 h-3 mr-2" />
                         {loadingDegreePhoto ? "Loading..." : "View Certificate"}
                       </Button>
-                      {tutor.degree_verified === 'pending' && (
+                      {tutor.tutor?.degree_verified === 'pending' && (
                         <>
                           <Button
                             variant="outline"
@@ -444,7 +472,7 @@ export default function TutorOnboardingTab({
                 </div>
               )}
 
-              {!tutor.degree_photo && showDegreeVerification && (
+              {!tutor.tutor?.degree_photo && showDegreeVerification && (
                 <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
                   <span className="text-sm text-yellow-700 dark:text-yellow-300">
@@ -455,21 +483,25 @@ export default function TutorOnboardingTab({
 
               <div className="flex flex-wrap gap-2">
                 <span className="text-sm font-medium text-foreground">Subjects:</span>
-                {tutor.subjects.map((subject, index) => (
-                  <Badge 
-                    key={index} 
-                    variant="secondary" 
-                    className="text-xs bg-secondary text-secondary-foreground border-border"
-                  >
-                    {subject}
-                  </Badge>
-                ))}
+                {tutor.tutor?.subjects && Array.isArray(tutor.tutor.subjects) && tutor.tutor.subjects.length > 0 ? (
+                  tutor.tutor.subjects.map((subject) => (
+                    <Badge 
+                      key={subject.id} 
+                      variant="secondary" 
+                      className="text-xs bg-secondary text-secondary-foreground border-border"
+                    >
+                      {subject.subject_name} ({subject.level})
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">No subjects specified</span>
+                )}
               </div>
 
-              {tutor.bio && (
+              {tutor.tutor?.bio && (
                 <div className="text-sm">
                   <span className="font-medium text-foreground">Bio: </span>
-                  <span className="text-muted-foreground line-clamp-2">{tutor.bio}</span>
+                  <span className="text-muted-foreground line-clamp-2">{tutor.tutor.bio}</span>
                 </div>
               )}
 
@@ -496,7 +528,7 @@ export default function TutorOnboardingTab({
                   )}
                 </div>
                 <div className="flex gap-2">
-                  {showDegreeVerification && tutor.degree_verified !== 'approved' && (
+                  {showDegreeVerification && tutor.tutor?.degree_verified !== 'approved' && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -586,7 +618,7 @@ export default function TutorOnboardingTab({
             </Button>
             {selectedTutor && (
               <div className="flex gap-2">
-                {selectedTutor.degree_verified !== 'approved' && (
+                {selectedTutor.tutor?.degree_verified !== 'approved' && (
                   <Button
                     onClick={() => {
                       handleApproveDegree(selectedTutor.id);
@@ -616,12 +648,12 @@ export default function TutorOnboardingTab({
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>
-              {showDegreeVerification && selectedTutor?.degree_photo 
+              {showDegreeVerification && selectedTutor?.tutor?.degree_photo 
                 ? "Reject Degree Certificate" 
                 : "Reject Tutor Application"}
             </DialogTitle>
             <DialogDescription>
-              {showDegreeVerification && selectedTutor?.degree_photo
+              {showDegreeVerification && selectedTutor?.tutor?.degree_photo
                 ? "Please provide a reason for rejecting this degree certificate. This reason will be sent to the tutor via email."
                 : "Please provide a reason for rejecting this tutor application. This reason will be sent to the tutor via email."}
             </DialogDescription>
@@ -633,7 +665,7 @@ export default function TutorOnboardingTab({
               <Textarea
                 id="rejection-reason"
                 placeholder={
-                  showDegreeVerification && selectedTutor?.degree_photo
+                  showDegreeVerification && selectedTutor?.tutor?.degree_photo
                     ? "Explain why the degree certificate is being rejected..."
                     : "Explain why the tutor application is being rejected..."
                 }
@@ -658,7 +690,7 @@ export default function TutorOnboardingTab({
             <Button
               variant="destructive"
               onClick={() => {
-                if (showDegreeVerification && selectedTutor?.degree_photo) {
+                if (showDegreeVerification && selectedTutor?.tutor?.degree_photo) {
                   handleRejectDegree(selectedTutorId!, rejectionReason);
                 } else {
                   handleConfirmReject();
@@ -667,7 +699,7 @@ export default function TutorOnboardingTab({
               disabled={!rejectionReason.trim() || rejectionReason.trim().length < 10}
             >
               <X className="w-4 h-4 mr-2" />
-              {showDegreeVerification && selectedTutor?.degree_photo
+              {showDegreeVerification && selectedTutor?.tutor?.degree_photo
                 ? "Reject Degree"
                 : "Reject Application"}
             </Button>
@@ -709,28 +741,28 @@ export default function TutorOnboardingTab({
                         <p className="text-foreground">{selectedTutor.phone}</p>
                       </div>
                     )}
-                    {selectedTutor.age && (
+                    {selectedTutor.tutor?.age && (
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Age</p>
-                        <p className="text-foreground">{selectedTutor.age} years</p>
+                        <p className="text-foreground">{selectedTutor.tutor.age} years</p>
                       </div>
                     )}
-                    {selectedTutor.country && (
+                    {selectedTutor.tutor?.country && (
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Country</p>
-                        <p className="text-foreground">{selectedTutor.country}</p>
+                        <p className="text-foreground">{selectedTutor.tutor.country}</p>
                       </div>
                     )}
-                    {selectedTutor.city && (
+                    {selectedTutor.tutor?.city && (
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">City</p>
-                        <p className="text-foreground">{selectedTutor.city}</p>
+                        <p className="text-foreground">{selectedTutor.tutor.city}</p>
                       </div>
                     )}
-                    {selectedTutor.address && (
+                    {selectedTutor.tutor?.address && (
                       <div className="md:col-span-2 space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Address</p>
-                        <p className="text-foreground">{selectedTutor.address}</p>
+                        <p className="text-foreground">{selectedTutor.tutor.address}</p>
                       </div>
                     )}
                   </div>
@@ -742,23 +774,23 @@ export default function TutorOnboardingTab({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-muted-foreground">Qualification</p>
-                      <p className="text-foreground">{selectedTutor.qualification}</p>
+                      <p className="text-foreground">{selectedTutor.tutor?.qualification || 'Not specified'}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-muted-foreground">Experience</p>
-                      <p className="text-foreground">{selectedTutor.experience_years} years</p>
+                      <p className="text-foreground">{selectedTutor.tutor?.experience_years || 0} years</p>
                     </div>
-                    {selectedTutor.hourly_rate && (
+                    {selectedTutor.tutor?.hourly_rate && (
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Hourly Rate</p>
-                        <p className="text-foreground">${selectedTutor.hourly_rate}/hour</p>
+                        <p className="text-foreground">${selectedTutor.tutor.hourly_rate}/hour</p>
                       </div>
                     )}
                     {showDegreeVerification && (
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Degree Status</p>
                         <div className="mt-1">
-                          {getDegreeStatusBadge(selectedTutor.degree_verified)}
+                          {getDegreeStatusBadge(selectedTutor.tutor?.degree_verified)}
                         </div>
                       </div>
                     )}
@@ -770,7 +802,7 @@ export default function TutorOnboardingTab({
                   <div className="space-y-3">
                     <h4 className="font-semibold text-foreground">Degree Certificate</h4>
                     <div className="p-4 bg-muted/30 rounded-lg border border-border">
-                      {selectedTutor.degree_photo ? (
+                      {selectedTutor.tutor?.degree_photo ? (
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -789,10 +821,10 @@ export default function TutorOnboardingTab({
                               View Certificate
                             </Button>
                           </div>
-                          {selectedTutor.rejection_reason && (
+                          {selectedTutor.tutor?.rejection_reason && (
                             <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
                               <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">Rejection Reason:</p>
-                              <p className="text-sm text-red-600 dark:text-red-400">{selectedTutor.rejection_reason}</p>
+                              <p className="text-sm text-red-600 dark:text-red-400">{selectedTutor.tutor.rejection_reason}</p>
                             </div>
                           )}
                         </div>
@@ -808,26 +840,31 @@ export default function TutorOnboardingTab({
 
                 {/* Subjects */}
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-foreground">Teaching Subjects</h4>
+                  <h4 className="font-semibold text-foreground">Subjects</h4>
                   <div className="flex flex-wrap gap-2">
-                    {selectedTutor.subjects.map((subject, index) => (
-                      <Badge 
-                        key={index} 
-                        variant="secondary" 
-                        className="text-sm bg-secondary text-secondary-foreground border-border"
-                      >
-                        {subject}
-                      </Badge>
-                    ))}
+                    {selectedTutor.tutor?.subjects && selectedTutor.tutor.subjects.length > 0 ? (
+                      selectedTutor.tutor.subjects.map((subject) => (
+                        <Badge 
+                          key={subject.id} 
+                          variant="secondary" 
+                          className="text-sm bg-secondary text-secondary-foreground border-border"
+                        >
+                          {subject.subject_name} ({subject.level})
+                          {subject.specialization && ` - ${subject.specialization}`}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground italic">No subjects specified</span>
+                    )}
                   </div>
                 </div>
 
                 {/* Bio */}
-                {selectedTutor.bio && (
+                {selectedTutor.tutor?.bio && (
                   <div className="space-y-3">
                     <h4 className="font-semibold text-foreground">Bio/Introduction</h4>
                     <div className="p-3 bg-muted/30 rounded-lg border border-border">
-                      <p className="text-foreground whitespace-pre-line">{selectedTutor.bio}</p>
+                      <p className="text-foreground whitespace-pre-line">{selectedTutor.tutor.bio}</p>
                     </div>
                   </div>
                 )}
@@ -838,7 +875,7 @@ export default function TutorOnboardingTab({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-muted-foreground">Application Date</p>
-                      <p className="text-foreground">{formatDate(selectedTutor.submitted_at)}</p>
+                      <p className="text-foreground">{formatDate(selectedTutor.created_at)}</p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-muted-foreground">Status</p>
@@ -858,7 +895,7 @@ export default function TutorOnboardingTab({
                   Close
                 </Button>
                 <div className="flex gap-2">
-                  {showDegreeVerification && selectedTutor.degree_photo && (
+                  {showDegreeVerification && selectedTutor.tutor?.degree_photo && (
                     <Button
                       variant="outline"
                       onClick={() => {

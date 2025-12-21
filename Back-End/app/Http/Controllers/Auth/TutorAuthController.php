@@ -78,6 +78,13 @@ class TutorAuthController extends Controller
                 'status' => 'pending',
             ]);
 
+            // Add email verification token
+            $user->email_verification_token = bin2hex(random_bytes(32));
+            $user->save();
+
+            // Send verification email
+            $this->sendVerificationEmail($user);
+
             // Handle degree photo upload
             $degreePhotoPath = null;
             if ($request->hasFile('degreePhoto')) {
@@ -189,4 +196,29 @@ class TutorAuthController extends Controller
             ], 500);
         }
     }
+
+/**
+ * Send verification email
+ */
+private function sendVerificationEmail(User $user)
+{
+    $verificationUrl = url('/api/verify-email/' . $user->email_verification_token);
+
+    if (app()->environment('local', 'development', 'testing')) {
+        // Store in email queue for development
+        \App\Models\EmailQueue::create([
+            'user_id' => $user->id,
+            'type' => 'verification',
+            'to' => $user->email,
+            'subject' => 'Verify Your Email Address',
+            'content' => "Hello {$user->name},\n\nPlease verify your email: {$verificationUrl}",
+            'token' => $user->email_verification_token,
+            'verification_url' => $verificationUrl,
+            'sent_at' => now(),
+        ]);
+    } else {
+        // Send real email in production
+        \Illuminate\Support\Facades\Mail::to($user->email)->send(new \App\Mail\EmailVerificationMail($user));
+    }
+}
 }
