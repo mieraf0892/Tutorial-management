@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { Code, Globe, GraduationCap, BookOpen, PersonStanding, Users } from "lucide-react";
+import { Code, Globe, GraduationCap, BookOpen, PersonStanding, Users, Shield } from "lucide-react";
+import ReCAPTCHA from "react-google-recaptcha";
 import { apiClient } from "@/lib/api";
 
-// Import shared constants (you might want to move these to a separate constants file)
+// Import shared constants
 const countries = ["Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Austria", "Bangladesh", "Belgium", "Brazil", "Canada", "Chile", "China", "Colombia", "Denmark", "Egypt", "Ethiopia", "Finland", "France", "Germany", "Ghana", "Greece", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Japan", "Jordan", "Kenya", "Lebanon", "Malaysia", "Mexico", "Morocco", "Netherlands", "New Zealand", "Nigeria", "Norway", "Pakistan", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Saudi Arabia", "Singapore", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland", "Syria", "Thailand", "Turkey", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Venezuela", "Vietnam", "Yemen"];
 const ethiopianCities = ["Addis Ababa", "Dire Dawa", "Mekelle", "Gondar", "Hawassa", "Bahir Dar", "Jimma", "Adama", "Dessie", "Jijiga"];
 const addisAbabaSubcities = ["Addis Ketema", "Akaky Kaliti", "Arada", "Bole", "Gullele", "Kirkos", "Kolfe Keranio", "Lideta", "Nifas Silk-Lafto", "Yeka", "Lemi Kura"];
@@ -26,6 +27,10 @@ const StudentForm = () => {
     learningMode: "", learningPreference: "",
     studyDays: [] as string[], hoursPerDay: ""
   });
+
+  const [captchaToken, setCaptchaToken] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const recaptchaRef = useRef<ReCAPTCHA>(null);
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -52,128 +57,134 @@ const StudentForm = () => {
 
   const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
+
+    // CAPTCHA validation
+    if (!captchaToken) {
+      toast({ 
+        title: "Security Check Required", 
+        description: "Please complete the CAPTCHA verification", 
+        variant: "destructive" 
+      });
+      setIsLoading(false);
+      return;
+    }
     
     if (!studentForm.courseType) {
       toast({ title: "Error", description: "Please select what you want to learn", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+
+    if (import.meta.env.PROD && !captchaToken) {
+      toast({
+        title: "Security Verification Required",
+        description: "Please complete the CAPTCHA verification.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
       return;
     }
 
     if (studentForm.password !== studentForm.passwordConfirm) {
       toast({ title: "Error", description: "Passwords do not match", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate address is filled for all countries
+    if (!studentForm.address.trim()) {
+      toast({ title: "Error", description: "Please enter your address", variant: "destructive" });
+      setIsLoading(false);
       return;
     }
 
     try {
-      // Prepare the data for backend
-      const formData = {
-        // User data
-        name: studentForm.name,
-        email: studentForm.email,
-        password: studentForm.password,
-        password_confirmation: studentForm.passwordConfirm,
-        
-        // Student personal information
-        fatherName: studentForm.fatherName,
-        age: parseInt(studentForm.age),
-        parentEmail: studentForm.parentEmail,
-        sex: studentForm.sex,
-        country: studentForm.country,
-        phoneCode: studentForm.phoneCode,
-        phone: studentForm.phone,
-        city: studentForm.city,
-        subcity: studentForm.subcity,
-        address: studentForm.address,
-        
-        // Course type
-        courseType: studentForm.courseType,
-        
-        // Learning preferences
-        learningPreference: studentForm.learningPreference,
-        studyDays: studentForm.studyDays,
-        hoursPerDay: studentForm.hoursPerDay,
-        learningMode: studentForm.learningMode,
-        
-        // Course-specific data
-        selectedArea: studentForm.selectedArea,
-        selectedLanguages: studentForm.selectedLanguages,
-        selectedGrade: studentForm.selectedGrade,
-        selectedCurriculum: studentForm.selectedCurriculum,
-        selectedSubjects: studentForm.selectedSubjects,
-        selectedExam: studentForm.selectedExam,
-      };
+    // ✅ Send ALL student information, not just basic data
+    const payload = {
+      name: studentForm.name,
+      email: studentForm.email,
+      password: studentForm.password,
+      password_confirmation: studentForm.passwordConfirm,
+      phone: studentForm.phoneCode + studentForm.phone,
 
-      // Send to Laravel backend using apiClient
-      const response = await apiClient.post('/register/student', formData);
-      const data = response.data;
-
-      if (data.success) {
-        toast({ 
-          title: "Success", 
-          description: data.message || "Student registration successful! Redirecting to login..." 
-        });
-        
-        // Reset form
-        setStudentForm({
-          name: "", fatherName: "", email: "", age: "", country: "", phoneCode: "", phone: "",
-          city: "", subcity: "", address: "", parentEmail: "", sex: "", courseType: "",
-          selectedArea: [], selectedLanguages: [], selectedGrade: "", selectedCurriculum: "",
-          selectedSubjects: [], selectedExam: "", learningMode: "", learningPreference: "",
-          studyDays: [], hoursPerDay: "", password: "", passwordConfirm:""
-        });
-        
-        // Redirect to login page after successful registration
-        setTimeout(() => {
-          navigate('/login');
-        }, 2000);
-        
-      } else {
-        // Handle validation errors from backend
-        if (data.errors) {
-          const firstError = Object.values(data.errors)[0];
-          toast({ 
-            title: "Validation Error", 
-            description: Array.isArray(firstError) ? firstError[0] : "Please check your input",
-            variant: "destructive" 
-          });
-        } else {
-          toast({ 
-            title: "Error", 
-            description: data.message || "Registration failed",
-            variant: "destructive" 
-          });
-        }
-      }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      console.error('Registration error:', error);
+      captcha_token: captchaToken,
       
-      // Handle different error types
-      if (error.response?.data) {
-        const data = error.response.data;
-        if (data.errors) {
-          const firstError = Object.values(data.errors)[0];
-          toast({ 
-            title: "Validation Error", 
-            description: Array.isArray(firstError) ? firstError[0] : "Please check your input",
-            variant: "destructive" 
-          });
-        } else {
-          toast({ 
-            title: "Error", 
-            description: data.message || "Registration failed",
-            variant: "destructive" 
-          });
-        }
-      } else {
-        toast({ 
-          title: "Network Error", 
-          description: "Cannot connect to server. Please try again.",
-          variant: "destructive" 
+      // Student personal information
+      fatherName: studentForm.fatherName,
+      age: parseInt(studentForm.age),
+      parentEmail: studentForm.parentEmail,
+      sex: studentForm.sex,
+      country: studentForm.country,
+      phoneCode: studentForm.phoneCode,
+      city: studentForm.city,
+      subcity: studentForm.subcity,
+      address: studentForm.address,
+      
+      // Course information
+      courseType: studentForm.courseType,
+      learningPreference: studentForm.learningPreference,
+      studyDays: studentForm.studyDays,
+      hoursPerDay: studentForm.hoursPerDay,
+      learningMode: studentForm.learningMode,
+      
+      // Course-specific fields
+      selectedArea: studentForm.selectedArea,
+      selectedLanguages: studentForm.selectedLanguages,
+      selectedGrade: studentForm.selectedGrade,
+      selectedCurriculum: studentForm.selectedCurriculum,
+      selectedSubjects: studentForm.selectedSubjects,
+      selectedExam: studentForm.selectedExam,
+    };
+
+    console.log('🔍 Full payload being sent:', payload);
+
+    const response = await apiClient.post("/register/student", payload);
+    console.log('✅ Registration successful:', response.data);
+
+    recaptchaRef.current?.reset();
+    setCaptchaToken("");
+
+    // Check if we have development info with verification URL
+    if (response.data.development_info) {
+      console.log('🔗 Verification URL:', response.data.development_info.verification_url);
+      
+      toast({
+        title: "Registration Successful!",
+        description: "Email verification stored in queue. Check admin dashboard.",
+        variant: "default",
+      });
+      
+      // Show verification URL for testing
+      if (import.meta.env.DEV) {
+        toast({
+          title: "Development Mode",
+          description: `Verification URL: ${response.data.development_info.verification_url}`,
+          variant: "default",
         });
       }
+    } else {
+      toast({
+        title: "Registration Successful",
+        description: "Redirecting to login…",
+      });
+      navigate("/login");
     }
-  };
+
+  } catch (error: any) {
+    console.error('❌ Registration error:', error.response?.data);
+    recaptchaRef.current?.reset();
+    setCaptchaToken("");
+    
+    toast({
+      title: "Registration Failed",
+      description: error.response?.data?.message || "Server rejected the request.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <form onSubmit={handleStudentSubmit} className="bg-card rounded-lg shadow-elegant p-8 space-y-6 border border-border">
@@ -228,7 +239,7 @@ const StudentForm = () => {
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="s-country">Country *</Label>
-          <Select value={studentForm.country} onValueChange={(val) => setStudentForm({...studentForm, country: val, phoneCode: phoneCodes[val] || "+1"})}>
+          <Select value={studentForm.country} onValueChange={(val) => setStudentForm({...studentForm, country: val, phoneCode: phoneCodes[val] || "+1", city: "", subcity: ""})}>
             <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
             <SelectContent className="max-h-60">{countries.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
@@ -242,6 +253,19 @@ const StudentForm = () => {
         </div>
       </div>
 
+      {/* Always show address field for all countries */}
+      <div className="space-y-2">
+        <Label htmlFor="s-address">Address *</Label>
+        <Input 
+          id="s-address" 
+          value={studentForm.address} 
+          onChange={(e) => setStudentForm({...studentForm, address: e.target.value})} 
+          placeholder="Your full address (e.g., 123 Main St, City, Country)"
+          required 
+        />
+      </div>
+
+      {/* Show city/subcity fields only for Ethiopia */}
       {studentForm.country === "Ethiopia" && (
         <div className="grid md:grid-cols-2 gap-4 animate-fade-in">
           <div className="space-y-2">
@@ -260,10 +284,6 @@ const StudentForm = () => {
               </Select>
             </div>
           )}
-          <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="s-address">Address *</Label>
-            <Input id="s-address" value={studentForm.address} onChange={(e) => setStudentForm({...studentForm, address: e.target.value})} required />
-          </div>
         </div>
       )}
 
@@ -484,8 +504,23 @@ const StudentForm = () => {
         </div>
       </div>
 
-      <Button type="submit" className="w-full" variant="default" size="lg">
-        Register as Student
+      <div className="space-y-4">
+        <div className="flex gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+          <Shield className="h-5 w-5 text-blue-600" />
+          <p className="text-sm text-blue-800">
+            Please complete the CAPTCHA verification to proceed.
+          </p>
+        </div>
+
+        <ReCAPTCHA
+          ref={recaptchaRef}
+          sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
+          onChange={(token) => setCaptchaToken(token || "")}
+        />
+      </div>
+
+      <Button type="submit" className="w-full" variant="default" size="lg" disabled={isLoading}>
+        {isLoading ? "Registering..." : "Register as Student"}
       </Button>
     </form>
   );

@@ -17,17 +17,28 @@ interface EnrolledTutorial {
   total_lessons: number;
   last_accessed: string;
   is_completed: boolean;
+  tutor_id: number;
+  tutor_name: string;
 }
 
 interface ClassListProps {
   tutorials: EnrolledTutorial[];
+  onChatWithTutor?: (tutorId: number) => void;
+  onTutorialClick: (tutorial: EnrolledTutorial) => void; // NEW PROP
 }
 
-export default function ClassList({ tutorials }: ClassListProps) {
+export default function ClassList({ 
+  tutorials, 
+  onChatWithTutor,
+  onTutorialClick 
+}: ClassListProps) {
   const navigate = useNavigate();
 
-  const handleTutorialClick = (tutorialId: number) => {
-    navigate(`/tutorials/${tutorialId}`);
+  const handleCardClick = (tutorial: EnrolledTutorial, e: React.MouseEvent) => {
+    // Only navigate if click is not on the button
+    if (!(e.target as HTMLElement).closest('button')) {
+      onTutorialClick(tutorial);
+    }
   };
 
   const formatLastAccessed = (dateString: string) => {
@@ -51,13 +62,20 @@ export default function ClassList({ tutorials }: ClassListProps) {
     return "text-muted-foreground bg-muted";
   };
 
+  const handleChatClick = (e: React.MouseEvent, tutorId: number) => {
+    e.stopPropagation();
+    if (onChatWithTutor) {
+      onChatWithTutor(tutorId);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {tutorials.map((tutorial) => (
         <Card 
           key={tutorial.id}
           className="cursor-pointer hover:shadow-lg transition-all duration-200 bg-card"
-          onClick={() => handleTutorialClick(tutorial.id)}
+          onClick={(e) => handleCardClick(tutorial, e)}
         >
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
@@ -109,15 +127,32 @@ export default function ClassList({ tutorials }: ClassListProps) {
                   <Progress value={tutorial.progress_percentage} className="h-2 bg-muted" />
                 </div>
 
-                {/* Instructor */}
+                {/* Instructor & Actions */}
                 <div className="flex items-center justify-between mt-3">
                   <div>
                     <p className="text-sm text-muted-foreground">Instructor</p>
                     <p className="font-medium text-foreground">{tutorial.instructor}</p>
+                    {tutorial.tutor_id && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 px-2 mt-1 text-xs"
+                        onClick={(e) => handleChatClick(e, tutorial.tutor_id)}
+                      >
+                        Message Tutor
+                      </Button>
+                    )}
                   </div>
-                  <Button size="sm" className="gap-2">
+                  <Button 
+                    size="sm" 
+                    className="gap-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTutorialClick(tutorial);
+                    }}
+                  >
                     <PlayCircle className="w-4 h-4" />
-                    Continue Learning
+                    {tutorial.is_completed ? 'Review' : 'Continue Learning'}
                   </Button>
                 </div>
               </div>

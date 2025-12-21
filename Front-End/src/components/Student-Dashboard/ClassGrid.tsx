@@ -17,17 +17,28 @@ interface EnrolledTutorial {
   total_lessons: number;
   last_accessed: string;
   is_completed: boolean;
+  tutor_id: number;
+  tutor_name: string;
 }
 
 interface ClassGridProps {
   tutorials: EnrolledTutorial[];
+  onChatWithTutor?: (tutorId: number) => void;
+  onTutorialClick: (tutorial: EnrolledTutorial) => void; // NEW PROP
 }
 
-export default function ClassGrid({ tutorials }: ClassGridProps) {
+export default function ClassGrid({ 
+  tutorials, 
+  onChatWithTutor, 
+  onTutorialClick 
+}: ClassGridProps) {
   const navigate = useNavigate();
 
-  const handleTutorialClick = (tutorialId: number) => {
-    navigate(`/tutorials/${tutorialId}`);
+  const handleCardClick = (tutorial: EnrolledTutorial, e: React.MouseEvent) => {
+    // Only navigate if click is not on the button
+    if (!(e.target as HTMLElement).closest('button')) {
+      onTutorialClick(tutorial);
+    }
   };
 
   const formatLastAccessed = (dateString: string) => {
@@ -42,13 +53,20 @@ export default function ClassGrid({ tutorials }: ClassGridProps) {
     return `${Math.ceil(diffDays / 30)} months ago`;
   };
 
+  const handleChatClick = (e: React.MouseEvent, tutorId: number) => {
+    e.stopPropagation();
+    if (onChatWithTutor) {
+      onChatWithTutor(tutorId);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {tutorials.map((tutorial) => (
         <Card 
           key={tutorial.id}
           className="cursor-pointer hover:shadow-lg transition-all duration-200 group bg-card"
-          onClick={() => handleTutorialClick(tutorial.id)}
+          onClick={(e) => handleCardClick(tutorial, e)}
         >
           <CardContent className="p-0">
             {/* Tutorial Image */}
@@ -130,10 +148,27 @@ export default function ClassGrid({ tutorials }: ClassGridProps) {
                 <div>
                   <p className="text-sm font-medium text-foreground">{tutorial.instructor}</p>
                   <p className="text-xs text-muted-foreground">Instructor</p>
+                  {tutorial.tutor_id && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 px-2 mt-1 text-xs"
+                      onClick={(e) => handleChatClick(e, tutorial.tutor_id)}
+                    >
+                      Message Tutor
+                    </Button>
+                  )}
                 </div>
-                <Button size="sm" className="gap-2">
+                <Button 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTutorialClick(tutorial);
+                  }}
+                >
                   <PlayCircle className="w-4 h-4" />
-                  Continue
+                  {tutorial.is_completed ? 'Review' : 'Continue'}
                 </Button>
               </div>
             </div>
