@@ -7,7 +7,9 @@ import { UniversalSidebar } from "@/components/UniversalSidebar";
 import { UserManagementDialog } from "@/components/Admin-Dashboard/UserManagementDialog";
 import { ManageClassDialog } from "@/components/Admin-Dashboard/ManageClassDialog";
 import { SendMessageDialog } from "@/components/Admin-Dashboard/SendMessageDialog";
+import EmailQueueTab from "@/components/Admin-Dashboard/EmailQueueTab";
 import { Button } from "@/components/ui/button";
+import { Mail, MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -21,7 +23,9 @@ import {
   BookOpen, 
   BarChart3,
   UserCheck,
+  Clock,
   ClipboardCheck,
+  ClipboardList,
   Bell,
   FileText,
   MessageCircle
@@ -34,10 +38,12 @@ import ClassesTab from "@/components/Admin-Dashboard/ClassesTab";
 import AnalyticsTab from "@/components/Admin-Dashboard/AnalyticsTab";
 import AdminOverview from "@/components/Admin-Dashboard/AdminOverview";
 import TutorOnboardingTab from "@/components/Admin-Dashboard/TutorOnboardingTab";
+import PendingTutorialsTab from "@/components/Admin-Dashboard/PendingTutorialsTab";
 import ReportingTab from "@/components/Admin-Dashboard/ReportingTab";
 import CommunicationTab from "@/components/Admin-Dashboard/CommunicationTab";
 import AttendanceTrackingTab from "@/components/Admin-Dashboard/AttendanceTrackingTab";
 import CreateClassDialog from "@/components/Admin-Dashboard/CreateClassDialog";
+import AssignmentsTab from "@/components/Admin-Dashboard/AssignmentsTab";
 
 // Types matching your backend responses
 interface Admin {
@@ -114,10 +120,15 @@ const adminNavigationItems = [
   { title: "User Management", value: "users", icon: Users },
   { title: "Tutor Onboarding", value: "tutor-onboarding", icon: UserCheck },
   { title: "Class Management", value: "classes", icon: BookOpen },
+  { title: "Pending Approvals", value: "pending-approvals", icon: Clock },
+  { title: "Assignments", value: "assignments", icon: ClipboardList },
   { title: "Reporting", value: "reporting", icon: ClipboardCheck },
   { title: "Communication", value: "communication", icon: Bell },
   { title: "Attendance Tracking", value: "attendance", icon: FileText },
   { title: "Analytics", value: "analytics", icon: BarChart3 },
+  ...(process.env.NODE_ENV === 'development' ? [
+    { title: "Email Queue", value: "email-queue", icon: Mail }
+  ] : []),
 ];
 
 export default function AdminDashboard() {
@@ -164,6 +175,11 @@ const fetchDashboardData = async () => {
         classes: user.enrollments_count || user.tutorials_count || 0
       }));
 
+      const pendingResponse = await apiClient.get("/tutor-approvals/pending");
+      const pendingTutors = pendingResponse.data.success 
+        ? pendingResponse.data.tutors?.data || []
+        : [];
+
       setDashboardData({
         admin: {
           name: user?.name || "Administrator",
@@ -181,7 +197,7 @@ const fetchDashboardData = async () => {
         },
         recent_activities: data.recent_activities || [],
         users: mappedUsers,
-        pending_tutors: data.pending_tutors || [],
+        pending_tutors: pendingTutors,
         pending_reports: data.pending_reports || [],
         classes: data.classes || [] // Add classes data if available
       });
@@ -237,11 +253,12 @@ const fetchTabData = async (tab: string) => {
       }
       
       case "tutor-onboarding": {
-        const tutorsResponse = await apiClient.get("/admin/pending-tutors");
+        const tutorsResponse = await apiClient.get("/tutor-approvals/pending");
         if (tutorsResponse.data.success && dashboardData) {
+          const tutorsData = tutorsResponse.data.tutors?.data || [];
           setDashboardData(prev => prev ? {
             ...prev,
-            pending_tutors: tutorsResponse.data.tutors || []
+            pending_tutors: tutorsData
           } : null);
         }
         break;
@@ -346,52 +363,61 @@ const handleFilterClick = () => {
   };
 
   const handleApproveTutor = async (tutorId: number) => {
-    try {
-      await apiClient.post(`/admin/tutors/${tutorId}/approve`);
+  try {
+    // Use correct endpoint
+    const response = await apiClient.post(`/tutor-approvals/${tutorId}/approve`);
+    
+    if (response.data.success) {
       toast({
         title: "Tutor Approved",
-        description: "Tutor account has been verified and activated.",
+        description: response.data.message || "Tutor approved successfully!",
       });
       // Refresh data
       fetchTabData("tutor-onboarding");
-    } catch (error: any) {
-      toast({
-        title: "Approval Failed",
-        description: error.response?.data?.message || "Failed to approve tutor",
-        variant: "destructive"
-      });
     }
-  };
+  } catch (error: any) {
+    toast({
+      title: "Approval Failed",
+      description: error.response?.data?.message || "Failed to approve tutor",
+      variant: "destructive"
+    });
+  }
+};
 
   const fetchPendingTutors = async () => {
   try {
-    // Fetch tutors with pending applications
-    const response = await apiClient.get('/admin/tutor-approvals/pending');
+    // Use the correct endpoint for pending approval tutors
+    const response = await apiClient.get('/tutor-approvals/pending');
     
-    // Also fetch tutors with pending degree verification
-    const degreeResponse = await apiClient.get('/admin/tutor-approvals/pending-degree');
-    
-    // Combine and deduplicate
-    const allTutors = [...response.data.tutors, ...degreeResponse.data.tutors];
-    const uniqueTutors = Array.from(new Map(allTutors.map(t => [t.id, t])).values());
-    
-    setPendingTutors(uniqueTutors);
+    if (response.data.success) {
+      // The backend should return tutors with degree_photo_url
+      setPendingTutors(response.data.tutors || []);
+    }
   } catch (error) {
-    console.error('Error fetching tutors:', error);
+    console.error('Error fetching pending tutors:', error);
+    toast({
+      title: "Error",
+      description: "Failed to load pending tutors",
+      variant: "destructive",
+    });
   }
 };
 
   const handleRejectTutor = async (tutorId: number, rejectionReason: string) => {
   try {
-    await apiClient.post(`/admin/tutors/${tutorId}/reject`, {
+    // Use correct endpoint
+    const response = await apiClient.post(`/admin/tutor-approvals/${tutorId}/reject`, {
       rejection_reason: rejectionReason
     });
-    toast({
-      title: "Tutor Rejected",
-      description: "Tutor application has been rejected and notification sent.",
-    });
-    // Refresh data
-    fetchTabData("tutor-onboarding");
+    
+    if (response.data.success) {
+      toast({
+        title: "Tutor Rejected",
+        description: response.data.message || "Tutor application rejected.",
+      });
+      // Refresh data
+      fetchTabData("tutor-onboarding");
+    }
   } catch (error: any) {
     toast({
       title: "Rejection Failed",
@@ -732,6 +758,17 @@ const handleFilterClick = () => {
                 />
               )}
 
+{activeTab === "pending-approvals" && (
+  <PendingTutorialsTab
+    searchQuery={searchQuery}
+    onRefresh={() => fetchDashboardData()}
+  />
+)}
+
+{activeTab === "assignments" && (
+  <AssignmentsTab/>
+)}
+
               {activeTab === "reporting" && (
                 <ReportingTab
                   pendingReports={pending_reports}
@@ -756,6 +793,10 @@ const handleFilterClick = () => {
 
               {activeTab === "analytics" && (
                 <AnalyticsTab analytics={[]} /> // You can add analytics data later
+              )}
+
+              {activeTab === "email-queue" && (
+                <EmailQueueTab />
               )}
             </div>
           </main>

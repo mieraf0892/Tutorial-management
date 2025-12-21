@@ -12,6 +12,7 @@ use App\Models\Student;
 use App\Models\Tutor;
 use App\Models\Tutorial;
 use App\Models\TutorialSession;
+use App\Models\TutorialAssignment;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class AdminController extends Controller
 {
@@ -45,6 +47,10 @@ class AdminController extends Controller
                 'total_classes' => Tutorial::count(),
                 'active_classes' => Tutorial::where('is_published', true)->count(),
                 'recent_attendance_count' => Attendance::whereDate('created_at', today())->count(),
+                // Add email queue stats if in development
+                'email_queue_count' => app()->environment('local', 'development') 
+                    ? \App\Models\EmailQueue::count() 
+                    : null,
             ];
 
             $recentActivities = User::with(['student', 'tutor'])
@@ -1075,8 +1081,8 @@ class AdminController extends Controller
         }   
     }
 
-    /**
- * Create a new class/tutorial.
+   /**
+ * Create a new class/tutorial (Admin creates and assigns)
  */
 public function createClass(Request $request)
 {
@@ -1116,8 +1122,11 @@ public function createClass(Request $request)
             ], 422);
         }
 
+        // Create tutorial with admin as creator
         $class = Tutorial::create([
-            'tutor_id' => $tutor->id,
+            'admin_id' => $request->user()->id,
+            'created_by_role' => 'admin',
+            'tutor_id' => $tutor->id, // Still set tutor_id for backward compatibility
             'title' => $request->title,
             'description' => $request->description,
             'category_id' => $request->category_id,
@@ -1128,15 +1137,25 @@ public function createClass(Request $request)
             'learning_objectives' => $request->learning_objectives,
             'includes' => $request->includes,
             'image' => $request->image ?? 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400',
-            'is_published' => $request->boolean('is_published', true),
+            'is_published' => false, // Don't publish immediately
+            'status' => 'draft', // Start as draft, tutor will add content
+        ]);
+
+        // Create assignment record
+        $assignment = TutorialAssignment::create([
+            'tutorial_id' => $class->id,
+            'tutor_id' => $tutor->id,
+            'assigned_by_admin_id' => $request->user()->id,
+            'status' => 'pending', // Tutor needs to accept
         ]);
 
         DB::commit();
 
         return response()->json([
             'success' => true,
-            'message' => 'Class created successfully',
-            'class' => $class->load(['tutor', 'category']),
+            'message' => 'Class created and assigned to tutor successfully',
+            'class' => $class->load(['tutor', 'category', 'assignments']),
+            'assignment' => $assignment
         ]);
     } catch (\Exception $e) {
         DB::rollBack();
@@ -1772,4 +1791,619 @@ public function removeStudent(Request $request, $id, $studentId)
             ], 500);
         }
     }
+
+    // In AdminController.php
+
+/**
+ * Approve a tutor-created tutorial
+ */
+public function approveTutorial(Request $request, $tutorialId)
+{
+    $tutorial = Tutorial::findOrFail($tutorialId);
+    
+    // Check if tutorial is pending approval
+    if ($tutorial->status !== 'pending_approval') {
+        return response()->json([
+            'success' => false,
+            'message' => 'Tutorial is not pending approval'
+        ], 422);
+    }
+    
+    $tutorial->update([
+        'status' => 'approved',
+        'approved_by_admin_id' => $request->user()->id,
+        'approved_at' => now()
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial approved successfully',
+        'tutorial' => $tutorial->load(['tutor', 'category'])
+    ]);
+}
+
+/**
+ * Reject a tutor-created tutorial
+ */
+public function rejectTutorial(Request $request, $tutorialId)
+{
+    $tutorial = Tutorial::findOrFail($tutorialId);
+    
+    // Check if tutorial is pending approval
+    if ($tutorial->status !== 'pending_approval') {
+        return response()->json([
+            'success' => false,
+            'message' => 'Tutorial is not pending approval'
+        ], 422);
+    }
+    
+    $tutorial->update([
+        'status' => 'rejected',
+        'rejection_reason' => $request->reason
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial rejected',
+        'tutorial' => $tutorial
+    ]);
+}
+
+/**
+ * Publish a tutorial (make visible to students)
+ */
+public function publishTutorial(Request $request, $tutorialId)
+{
+    $tutorial = Tutorial::findOrFail($tutorialId);
+    
+    // Check if tutorial is approved
+    if ($tutorial->status !== 'approved') {
+        return response()->json([
+            'success' => false,
+            'message' => 'Only approved tutorials can be published'
+        ], 422);
+    }
+    
+    $tutorial->update([
+        'status' => 'published',
+        'is_published' => true
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial published successfully',
+        'tutorial' => $tutorial
+    ]);
+}
+
+/**
+ * Get tutorials pending admin approval
+ */
+public function getPendingTutorials(Request $request)
+{
+    $tutorials = Tutorial::with(['tutor', 'category'])
+        ->where('status', 'pending_approval')
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'tutorials' => $tutorials
+    ]);
+}
+
+/**
+ * Get all assignments (admin view)
+ */
+public function getAssignments(Request $request)
+{
+    $assignments = TutorialAssignment::with(['tutorial', 'tutor', 'assignedBy'])
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'assignments' => $assignments
+    ]);
+}
+
+/**
+ * Assign tutor to existing tutorial
+ */
+public function assignTutor(Request $request, $tutorialId)
+{
+    $validator = Validator::make($request->all(), [
+        'tutor_id' => 'required|exists:users,id',
+    ]);
+    
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+    
+    $tutorial = Tutorial::findOrFail($tutorialId);
+    $tutor = User::findOrFail($request->tutor_id);
+    
+    if ($tutor->role !== 'tutor') {
+        return response()->json([
+            'success' => false,
+            'message' => 'Selected user is not a tutor'
+        ], 422);
+    }
+    
+    // Check if already assigned
+    $existing = TutorialAssignment::where('tutorial_id', $tutorialId)
+        ->where('tutor_id', $tutor->id)
+        ->first();
+    
+    if ($existing) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Tutor is already assigned to this tutorial'
+        ], 422);
+    }
+    
+    $assignment = TutorialAssignment::create([
+        'tutorial_id' => $tutorial->id,
+        'tutor_id' => $tutor->id,
+        'assigned_by_admin_id' => $request->user()->id,
+        'status' => 'pending'
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutor assigned successfully',
+        'assignment' => $assignment->load(['tutorial', 'tutor'])
+    ]);
+}
+
+/**
+ * Archive a tutorial
+ */
+public function archiveTutorial(Request $request, $tutorialId)
+{
+    $tutorial = Tutorial::findOrFail($tutorialId);
+    
+    $tutorial->update([
+        'status' => 'archived',
+        'is_published' => false
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Tutorial archived successfully',
+        'tutorial' => $tutorial
+    ]);
+}
+
+/**
+ * Get tutorials pending review (tutor completed content)
+ */
+public function getPendingReviewTutorials(Request $request)
+{
+    $tutorials = Tutorial::with(['tutor', 'category', 'assignments'])
+        ->where('status', 'pending_review')
+        ->orWhere('status', 'completed')
+        ->orderBy('updated_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'success' => true,
+        'tutorials' => $tutorials
+    ]);
+}
+
+/**
+ * Review and approve completed tutorial content
+ */
+public function reviewTutorial(Request $request, $tutorialId)
+{
+    $tutorial = Tutorial::with(['tutor', 'assignments'])->findOrFail($tutorialId);
+    
+    // Check if tutorial is ready for review
+    if (!in_array($tutorial->status, ['pending_review', 'completed'])) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Tutorial is not ready for review'
+        ], 422);
+    }
+    
+    $validator = Validator::make($request->all(), [
+        'action' => 'required|in:approve,request_changes,publish',
+        'feedback' => 'nullable|string|max:1000'
+    ]);
+    
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'errors' => $validator->errors()
+        ], 422);
+    }
+    
+    switch ($request->action) {
+        case 'approve':
+            $tutorial->update([
+                'status' => 'approved',
+                'approved_by_admin_id' => $request->user()->id,
+                'approved_at' => now()
+            ]);
+            $message = 'Tutorial content approved';
+            break;
+            
+        case 'request_changes':
+            $tutorial->update([
+                'status' => 'in_progress' // Send back to tutor
+            ]);
+            $message = 'Changes requested. Tutorial sent back to tutor.';
+            break;
+            
+        case 'publish':
+            $tutorial->update([
+                'status' => 'published',
+                'is_published' => true,
+                'approved_by_admin_id' => $request->user()->id,
+                'approved_at' => now()
+            ]);
+            $message = 'Tutorial published successfully';
+            break;
+    }
+    
+    return response()->json([
+        'success' => true,
+        'message' => $message,
+        'tutorial' => $tutorial
+    ]);
+}
+
+// Add these methods to your AdminController class
+
+/**
+ * Get email queue for development
+ */
+public function getEmailQueue(Request $request)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    try {
+        $query = \App\Models\EmailQueue::with('user');
+
+        // Filter by type
+        if ($request->has('type')) {
+            $query->where('type', $request->type);
+        }
+
+        // Filter by user
+        if ($request->has('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+
+        // Filter by date range
+        if ($request->has('start_date') && $request->has('end_date')) {
+            $query->whereBetween('created_at', [
+                $request->start_date,
+                $request->end_date
+            ]);
+        }
+
+        // Search by email or subject
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('to', 'like', "%{$search}%")
+                  ->orWhere('subject', 'like', "%{$search}%")
+                  ->orWhere('content', 'like', "%{$search}%");
+            });
+        }
+
+        $emails = $query->orderBy('created_at', 'desc')
+            ->paginate($request->get('per_page', 20));
+
+        $formattedEmails = $emails->map(function ($email) {
+            return [
+                'id' => $email->id,
+                'user_id' => $email->user_id,
+                'user_name' => $email->user->name ?? 'N/A',
+                'type' => $email->type,
+                'to' => $email->to,
+                'subject' => $email->subject,
+                'content_preview' => Str::limit($email->content, 100),
+                'content' => $email->content,
+                'token' => $email->token,
+                'verification_url' => $email->verification_url,
+                'sent_at' => $email->sent_at?->toISOString(),
+                'viewed_at' => $email->viewed_at?->toISOString(),
+                'created_at' => $email->created_at->toISOString(),
+                'is_viewed' => !is_null($email->viewed_at),
+                'is_verification' => $email->type === 'verification',
+            ];
+        });
+
+        $stats = [
+            'total' => \App\Models\EmailQueue::count(),
+            'verifications' => \App\Models\EmailQueue::where('type', 'verification')->count(),
+            'unviewed' => \App\Models\EmailQueue::whereNull('viewed_at')->count(),
+            'today' => \App\Models\EmailQueue::whereDate('created_at', today())->count(),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'emails' => $formattedEmails,
+            'stats' => $stats,
+            'pagination' => [
+                'current_page' => $emails->currentPage(),
+                'total_pages' => $emails->lastPage(),
+                'total_items' => $emails->total(),
+                'per_page' => $emails->perPage(),
+            ],
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Get email queue error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch email queue',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * Get email queue details
+ */
+public function getEmailQueueDetails(Request $request, $id)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    try {
+        $email = \App\Models\EmailQueue::with('user')->findOrFail($id);
+
+        // Mark as viewed
+        if (!$email->viewed_at) {
+            $email->markAsViewed();
+        }
+
+        return response()->json([
+            'success' => true,
+            'email' => [
+                'id' => $email->id,
+                'user_id' => $email->user_id,
+                'user' => $email->user ? [
+                    'id' => $email->user->id,
+                    'name' => $email->user->name,
+                    'email' => $email->user->email,
+                    'role' => $email->user->role,
+                    'status' => $email->user->status,
+                ] : null,
+                'type' => $email->type,
+                'to' => $email->to,
+                'subject' => $email->subject,
+                'content' => $email->content,
+                'token' => $email->token,
+                'verification_url' => $email->verification_url,
+                'sent_at' => $email->sent_at?->toISOString(),
+                'viewed_at' => $email->viewed_at?->toISOString(),
+                'created_at' => $email->created_at->toISOString(),
+                'is_verification' => $email->type === 'verification',
+            ],
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Get email queue details error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch email details',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * Search email queue by token (for quick verification)
+ */
+public function searchEmailQueueByToken(Request $request, $token)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    try {
+        $email = \App\Models\EmailQueue::with('user')
+            ->where('token', $token)
+            ->first();
+
+        if (!$email) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Email not found with this token',
+            ], 404);
+        }
+
+        // Mark as viewed
+        if (!$email->viewed_at) {
+            $email->markAsViewed();
+        }
+
+        return response()->json([
+            'success' => true,
+            'email' => [
+                'id' => $email->id,
+                'type' => $email->type,
+                'to' => $email->to,
+                'subject' => $email->subject,
+                'content' => $email->content,
+                'token' => $email->token,
+                'verification_url' => $email->verification_url,
+                'user' => $email->user ? [
+                    'id' => $email->user->id,
+                    'name' => $email->user->name,
+                    'email' => $email->user->email,
+                    'role' => $email->user->role,
+                ] : null,
+            ],
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Search email queue by token error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to search email queue',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * Clear old emails from queue
+ */
+public function clearEmailQueue(Request $request)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    try {
+        $days = $request->get('days', 7);
+        $deleted = \App\Models\EmailQueue::where('created_at', '<', now()->subDays($days))->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => "Deleted {$deleted} old emails (older than {$days} days)",
+            'deleted_count' => $deleted,
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Clear email queue error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to clear email queue',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * Get email queue statistics
+ */
+public function getEmailQueueStats(Request $request)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    try {
+        $stats = [
+            'total_emails' => \App\Models\EmailQueue::count(),
+            'verification_emails' => \App\Models\EmailQueue::where('type', 'verification')->count(),
+            'welcome_emails' => \App\Models\EmailQueue::where('type', 'welcome')->count(),
+            'notification_emails' => \App\Models\EmailQueue::where('type', 'notification')->count(),
+            'unviewed_emails' => \App\Models\EmailQueue::whereNull('viewed_at')->count(),
+            'today_emails' => \App\Models\EmailQueue::whereDate('created_at', today())->count(),
+            'yesterday_emails' => \App\Models\EmailQueue::whereDate('created_at', today()->subDay())->count(),
+        ];
+
+        $recentEmails = \App\Models\EmailQueue::with('user')
+            ->orderBy('created_at', 'desc')
+            ->limit(10)
+            ->get()
+            ->map(function ($email) {
+                return [
+                    'id' => $email->id,
+                    'type' => $email->type,
+                    'to' => $email->to,
+                    'subject' => $email->subject,
+                    'user_name' => $email->user->name ?? 'N/A',
+                    'created_at' => $email->created_at->diffForHumans(),
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'stats' => $stats,
+            'recent_emails' => $recentEmails,
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Get email queue stats error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch email queue statistics',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
+
+/**
+ * Simulate sending email (for testing)
+ */
+public function simulateEmail(Request $request)
+{
+    if (!in_array($request->user()->role, ['admin', 'super_admin'])) {
+        return response()->json(['error' => 'Forbidden', 'message' => 'Admin access required'], 403);
+    }
+
+    if (!app()->environment('local', 'development', 'testing')) {
+        return response()->json([
+            'success' => false,
+            'message' => 'This endpoint is only available in development mode',
+        ], 403);
+    }
+
+    $validator = Validator::make($request->all(), [
+        'user_id' => 'required|exists:users,id',
+        'type' => 'required|in:verification,welcome,notification,approval,rejection',
+        'subject' => 'required|string|max:255',
+        'content' => 'required|string',
+        'token' => 'nullable|string',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors' => $validator->errors(),
+        ], 422);
+    }
+
+    try {
+        $user = User::findOrFail($request->user_id);
+
+        $email = \App\Models\EmailQueue::create([
+            'user_id' => $user->id,
+            'type' => $request->type,
+            'to' => $user->email,
+            'subject' => $request->subject,
+            'content' => $request->content,
+            'token' => $request->token,
+            'sent_at' => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email simulated and stored in queue',
+            'email' => [
+                'id' => $email->id,
+                'type' => $email->type,
+                'to' => $email->to,
+                'subject' => $email->subject,
+                'content_preview' => Str::limit($email->content, 100),
+                'verification_url' => $email->verification_url,
+                'created_at' => $email->created_at->toISOString(),
+            ],
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Simulate email error: ' . $e->getMessage());
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to simulate email',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}
 }

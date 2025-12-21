@@ -14,6 +14,7 @@ import {
   Users,
   Clock,
   CreditCard,
+  ClipboardList,
   User,
   MessageCircle,
   Upload,
@@ -23,6 +24,7 @@ import {
 
 // Components
 import TutorQuickStats from "@/components/Tutor-Dashboard/TutorQuickStats";
+import AssignmentsTab from "@/components/Tutor-Dashboard/AssignmentsTab";
 import TutorialsTab from "@/components/Tutor-Dashboard/TutorialsTab";
 import SessionsTab from "@/components/Tutor-Dashboard/SessionsTab";
 import StudentsTab from "@/components/Tutor-Dashboard/StudentsTab";
@@ -40,6 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 // Sidebar items - Added Overview as first item
 const tutorNavigationItems = [
   { title: "Overview", value: "overview", icon: LayoutDashboard },
+  { title: "My Assignments", value: "assignments", icon: ClipboardList },
   { title: "My Tutorials", value: "tutorials", icon: BookOpen },
   { title: "Sessions", value: "sessions", icon: Clock },
   { title: "Attendance", value: "attendance", icon: CheckCircle },
@@ -304,6 +307,13 @@ export default function TutorDashboard() {
                   recentPayments={dashboardData?.recent_payments || []}
                   onCreateTutorial={() => setShowCreateDialog(true)} 
                 />
+              )}
+
+              {activeTab === "assignments" && (
+                <AssignmentsTab
+                  onAssignmentAccepted={fetchDashboardData}
+                  onAssignmentRejected={fetchDashboardData}
+                />  
               )}
 
               {activeTab === "tutorials" && (

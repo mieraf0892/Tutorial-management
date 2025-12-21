@@ -1,289 +1,232 @@
-// components/Tutor-Dashboard/TutorOverview.tsx
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Users, BookOpen, Calendar, ArrowUpRight, Clock, CreditCard } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-
-interface Stats {
-  total_tutorials: number;
-  total_students: number;
-  upcoming_sessions: number;
-  completed_sessions: number;
-  total_earnings: number;
-  average_rating: number;
-}
-
-interface Student {
-  id: number;
-  name: string;
-  email: string;
-  tutorial_id: number;
-  tutorial_title: string;
-  enrollment_date: string;
-  progress_percentage: number;
-  last_accessed: string;
-}
-
-interface Tutorial {
-  id: number;
-  title: string;
-  description: string;
-  category: string;
-  image: string;
-  student_count: number;
-  total_sessions: number;
-  completed_sessions: number;
-  created_at: string;
-}
-
-interface TutorialSession {
-  id: number;
-  tutorial_id: number;
-  tutorial_title: string;
-  title: string;
-  start_time: string;
-  end_time: string;
-  status: "scheduled" | "completed" | "cancelled";
-  meeting_link: string | null;
-  student_count: number;
-  attendance_marked: boolean;
-}
-
-interface Payment {
-  id: number;
-  amount: number;
-  currency: string;
-  description: string;
-  status: "completed" | "pending" | "failed";
-  date: string;
-  tutorial_title: string;
-}
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { 
+  BookOpen, 
+  Users, 
+  Clock, 
+  DollarSign,
+  ClipboardList,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle,
+  XCircle
+} from "lucide-react";
 
 interface TutorOverviewProps {
-  stats: Stats;
-  students: Student[];
-  tutorials: Tutorial[];
-  upcomingSessions: TutorialSession[];
-  recentPayments: Payment[];
+  stats: any;
+  students: any[];
+  tutorials: any[];
+  upcomingSessions: any[];
+  recentPayments: any[];
   onCreateTutorial: () => void;
-  onViewStudents?: () => void;
-  onViewSchedule?: () => void;
 }
 
-export default function TutorOverview({ 
-  stats, 
-  students, 
-  tutorials,  
+export default function TutorOverview({
+  stats,
+  students,
+  tutorials,
+  upcomingSessions,
   recentPayments,
-  onCreateTutorial,
-  onViewStudents,
-  onViewSchedule
+  onCreateTutorial
 }: TutorOverviewProps) {
-  const navigate = useNavigate();
+  
+  // Calculate stats for display
+  const displayStats = [
+    {
+      label: "Total Tutorials",
+      value: stats?.total_tutorials || 0,
+      icon: BookOpen,
+      color: "text-blue-600 bg-blue-100",
+      description: "Created by you"
+    },
+    {
+      label: "Assigned Tutorials",
+      value: stats?.assigned_tutorials || 0,
+      icon: ClipboardList,
+      color: "text-purple-600 bg-purple-100",
+      description: "From admin assignments"
+    },
+    {
+      label: "Total Students",
+      value: stats?.total_students || 0,
+      icon: Users,
+      color: "text-green-600 bg-green-100",
+      description: "Across all tutorials"
+    },
+    {
+      label: "Pending Assignments",
+      value: stats?.pending_assignments || 0,
+      icon: AlertCircle,
+      color: "text-yellow-600 bg-yellow-100",
+      description: "Need your response"
+    }
+  ];
 
-  // Default handlers if not provided
-  const handleViewStudents = onViewStudents || (() => navigate("/tutor/students"));
-  const handleViewSchedule = onViewSchedule || (() => navigate("/tutor/schedule"));
+  // Filter tutorials by status
+  const publishedTutorials = tutorials?.filter(t => t.status === 'published') || [];
+  const pendingTutorials = tutorials?.filter(t => t.status === 'pending_approval') || [];
+  const draftTutorials = tutorials?.filter(t => t.status === 'draft') || [];
 
   return (
     <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {displayStats.map((stat, index) => (
+          <Card key={index}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {stat.label}
+                  </p>
+                  <h3 className="text-2xl font-bold mt-2">{stat.value}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {stat.description}
+                  </p>
+                </div>
+                <div className={`p-3 rounded-full ${stat.color}`}>
+                  <stat.icon className="w-6 h-6" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Tutorial Status Summary */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Create New Tutorial</CardTitle>
-            <Plus className="h-4 w-4 text-muted-foreground" />
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BookOpen className="w-5 h-5" />
+              Tutorial Status
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">
-              Start a new tutorial and reach more students
-            </p>
-            <Button size="sm" className="w-full" onClick={onCreateTutorial}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Tutorial
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Manage Students</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">
-              {stats?.total_students || 0} total students enrolled
-            </p>
-            <Button variant="outline" size="sm" className="w-full" onClick={handleViewStudents}>
-              <Users className="h-4 w-4 mr-2" />
-              View Students
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-foreground">Upcoming Sessions</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">
-              {stats?.upcoming_sessions || 0} sessions scheduled
-            </p>
-            <Button variant="outline" size="sm" className="w-full" onClick={handleViewSchedule}>
-              <Calendar className="h-4 w-4 mr-2" />
-              View Schedule
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Students Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-foreground">Recent Students</CardTitle>
-              <CardDescription>
-                Your recently enrolled students and their progress
-              </CardDescription>
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span>Published</span>
+                </div>
+                <Badge variant="outline">{publishedTutorials.length}</Badge>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-yellow-500" />
+                  <span>Pending Approval</span>
+                </div>
+                <Badge variant="outline" className="bg-yellow-50 text-yellow-700">
+                  {pendingTutorials.length}
+                </Badge>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-gray-500" />
+                  <span>Drafts</span>
+                </div>
+                <Badge variant="outline">{draftTutorials.length}</Badge>
+              </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleViewStudents}>
-              View All
-              <ArrowUpRight className="h-4 w-4 ml-2" />
+            
+            <Button 
+              onClick={onCreateTutorial}
+              className="w-full"
+            >
+              <BookOpen className="w-4 h-4 mr-2" />
+              Create New Tutorial
             </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {students && students.length > 0 ? (
-            <div className="space-y-4">
-              {students.slice(0, 5).map((student) => (
-                <div key={student.id} className="flex items-center justify-between p-3 border border-border rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Users className="h-5 w-5 text-primary" />
-                    </div>
+            
+            <p className="text-xs text-muted-foreground text-center">
+              New tutorials require admin approval before publishing
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Sessions */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              Upcoming Sessions
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {upcomingSessions.length > 0 ? (
+              <div className="space-y-3">
+                {upcomingSessions.slice(0, 3).map((session) => (
+                  <div 
+                    key={session.id} 
+                    className="flex items-center justify-between p-3 border rounded-lg"
+                  >
                     <div>
-                      <p className="font-medium text-foreground">{student.name}</p>
-                      <p className="text-sm text-muted-foreground">{student.tutorial_title}</p>
+                      <p className="font-medium">{session.title}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {new Date(session.start_time).toLocaleDateString()} • 
+                        {new Date(session.start_time).toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </p>
                     </div>
+                    <Badge variant="outline">
+                      {session.tutorial?.title || 'No Tutorial'}
+                    </Badge>
                   </div>
-                  <div className="text-right">
-                    <p className="font-medium text-foreground">{student.progress_percentage}%</p>
-                    <p className="text-sm text-muted-foreground">Progress</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">No students enrolled yet</p>
-              <Button variant="outline" size="sm" className="mt-2" onClick={onCreateTutorial}>
-                Create your first tutorial
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recent Tutorials & Payments */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Tutorials */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-foreground">Recent Tutorials</CardTitle>
-            <CardDescription>Your most recent tutorials</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {tutorials && tutorials.length > 0 ? (
-              tutorials.slice(0, 3).map((tutorial) => (
-                <div key={tutorial.id} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground truncate">{tutorial.title}</p>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span>{tutorial.student_count} students</span>
-                      <span>{tutorial.completed_sessions}/{tutorial.total_sessions} sessions</span>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => navigate(`/tutor/tutorials/${tutorial.id}`)}>
-                    View
-                  </Button>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-4">
-                <BookOpen className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No tutorials created yet</p>
+                ))}
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Payments */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-foreground">Recent Payments</CardTitle>
-            <CardDescription>Latest payment transactions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {recentPayments && recentPayments.length > 0 ? (
-              recentPayments.slice(0, 3).map((payment) => (
-                <div key={payment.id} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground truncate">{payment.tutorial_title}</p>
-                    <p className="text-sm text-muted-foreground">
-                      ${payment.amount} • {new Date(payment.date).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className={`px-2 py-1 rounded-full text-xs ${
-                    payment.status === 'completed' 
-                      ? 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-400' 
-                      : payment.status === 'pending'
-                      ? 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-400'
-                      : 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-400'
-                  }`}>
-                    {payment.status}
-                  </div>
-                </div>
-              ))
             ) : (
-              <div className="text-center py-4">
-                <CreditCard className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No payments yet</p>
+              <div className="text-center py-6">
+                <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground">No upcoming sessions</p>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Quick Stats Summary */}
+      {/* Recent Activity */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-foreground">Performance Summary</CardTitle>
-          <CardDescription>Your overall tutoring performance</CardDescription>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <TrendingUp className="w-5 h-5" />
+            Quick Tips
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 border border-border rounded-lg">
-              <BookOpen className="h-6 w-6 text-primary mx-auto mb-2" />
-              <p className="text-2xl font-bold text-foreground">{stats?.total_tutorials || 0}</p>
-              <p className="text-sm text-muted-foreground">Tutorials</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2 p-4 border rounded-lg">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-blue-500" />
+                <h4 className="font-medium">Check Assignments</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Go to "My Assignments" to review and accept/reject tutorials assigned by admin.
+              </p>
             </div>
-            <div className="text-center p-4 border border-border rounded-lg">
-              <Users className="h-6 w-6 text-primary mx-auto mb-2" />
-              <p className="text-2xl font-bold text-foreground">{stats?.total_students || 0}</p>
-              <p className="text-sm text-muted-foreground">Students</p>
+            
+            <div className="space-y-2 p-4 border rounded-lg">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-green-500" />
+                <h4 className="font-medium">Create Content</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                After accepting an assignment, add lessons and materials to the tutorial.
+              </p>
             </div>
-            <div className="text-center p-4 border border-border rounded-lg">
-              <Clock className="h-6 w-6 text-primary mx-auto mb-2" />
-              <p className="text-2xl font-bold text-foreground">{stats?.completed_sessions || 0}</p>
-              <p className="text-sm text-muted-foreground">Sessions Completed</p>
-            </div>
-            <div className="text-center p-4 border border-border rounded-lg">
-              <CreditCard className="h-6 w-6 text-primary mx-auto mb-2" />
-              <p className="text-2xl font-bold text-foreground">${stats?.total_earnings || 0}</p>
-              <p className="text-sm text-muted-foreground">Total Earnings</p>
+            
+            <div className="space-y-2 p-4 border rounded-lg">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-yellow-500" />
+                <h4 className="font-medium">Approval Required</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Tutorials you create need admin approval before they're published.
+              </p>
             </div>
           </div>
         </CardContent>
