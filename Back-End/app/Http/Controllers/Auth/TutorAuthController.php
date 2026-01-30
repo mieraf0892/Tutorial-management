@@ -7,6 +7,10 @@ use App\Models\Tutor;
 use App\Models\TutorSubject;
 use App\Models\TutorAvailability;
 use App\Models\User;
+use App\Models\EmailQueue;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\EmailVerificationMail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -78,12 +82,15 @@ class TutorAuthController extends Controller
                 'status' => 'pending',
             ]);
 
-            // Add email verification token
-            $user->email_verification_token = bin2hex(random_bytes(32));
-            $user->save();
-
-            // Send verification email
-            $this->sendVerificationEmail($user);
+            // Generate secure, temporary signed verification URL (expires in 72 hours)
+            $verificationUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                'verification.verify',
+                now()->addHours(72),
+                [
+                    'id'   => $user->getKey(),
+                    'hash' => sha1($user->getEmailForVerification()),
+                ]
+            );
 
             // Handle degree photo upload
             $degreePhotoPath = null;
@@ -132,6 +139,9 @@ class TutorAuthController extends Controller
                     'end_time' => $slot['endTime'],
                 ]);
             }
+
+             // Send verification email
+            $this->sendVerificationEmail($user, $verificationUrl);
 
             DB::commit();
 
@@ -200,25 +210,42 @@ class TutorAuthController extends Controller
 /**
  * Send verification email
  */
-private function sendVerificationEmail(User $user)
-{
-    $verificationUrl = url('/api/verify-email/' . $user->email_verification_token);
+    private function sendVerificationEmail(User $user, string $verificationUrl)
+    {
+        // Production / real email sending (Mailtrap in dev if SMTP is configured)
+            try {
+                Mail::to($user->email)
+                    ->send(new EmailVerificationMail($user, $verificationUrl));
 
-    if (app()->environment('local', 'development', 'testing')) {
-        // Store in email queue for development
-        \App\Models\EmailQueue::create([
-            'user_id' => $user->id,
-            'type' => 'verification',
-            'to' => $user->email,
-            'subject' => 'Verify Your Email Address',
-            'content' => "Hello {$user->name},\n\nPlease verify your email: {$verificationUrl}",
-            'token' => $user->email_verification_token,
-            'verification_url' => $verificationUrl,
-            'sent_at' => now(),
-        ]);
-    } else {
-        // Send real email in production
-        \Illuminate\Support\Facades\Mail::to($user->email)->send(new \App\Mail\EmailVerificationMail($user));
+                Log::info('Verification email sent successfully to: ' . $user->email);
+            } catch (\Exception $e) {
+                Log::error('Failed to send verification email to ' . $user->email . ': ' . $e->getMessage());
+            }
+        // if (app()->environment('local', 'development', 'testing')) {
+            // Store in email queue for development (no real send)
+        //     $email = EmailQueue::create([
+        //         'user_id'          => $user->id,
+        //         'type'             => 'verification',
+        //         'to'               => $user->email,
+        //         'subject'          => 'Verify Your Email Address - Tutorial Management System',
+        //         'content'          => "Hello {$user->name},\n\n" .
+        //                          "Please click the link below to verify your email address:\n\n" .
+        //                          "{$verificationUrl}\n\n" .
+        //                          "This link will expire in 72 hours.\n\n" .
+        //                          "If you did not create an account, no further action is required.\n\n" .
+        //                          "Best regards,\nTutorial Management System Team",
+        //         'verification_url' => $verificationUrl,
+        //         'sent_at'          => now(),
+        //     ]);
+
+        //     Log::info('Email verification stored in queue from TutorAuthController', [
+        //         'user_id'         => $user->id,
+        //         'email'           => $user->email,
+        //         'verification_url' => $verificationUrl,
+        //         'email_queue_id'  => $email->id ?? 'N/A'
+        //     ]);
+        // } else {
+            
+        // }
     }
-}
-}
+} 

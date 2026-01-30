@@ -11,35 +11,35 @@ class Tutorial extends Model
     use HasFactory;
 
     protected $fillable = [
-        'tutor_id',
-        'title',
-        'description',
-        'category_id',
-        'duration',
-        'enrollment_count', // CHANGED from 'students'
-        'rating',
-        'level',
-        'image',
-        'content',
-        'instructor',
-        'price',
-        'is_published',
-        'is_free', // ADD THIS
-        'has_preview', // ADD THIS
-        'preview_description', // ADD THIS
-        'preview_video_url', // ADD THIS
-        'preview_lessons_count', // ADD THIS
-        'instructor_bio',
-        'instructor_experience',
-        'learning_objectives',
-        'includes',
-        'created_by_role',
-        'admin_id',
-        'status',
-        'approved_by_admin_id',
-        'approved_at',
-        'rejection_reason'
-    ];
+    'tutor_id',
+    'course_id',
+    'title',
+    'batch_name',
+    'enrollment_code',
+    'description',
+    'schedule',
+    'start_date',
+    'end_date',
+    'max_capacity',
+    'current_enrollment',
+    'duration_hours',
+    'price',
+    'level',
+    'instructor',
+    'instructor_bio',
+    'image',
+    'content',
+    'curriculum',
+    'learning_outcomes',
+    'requirements',
+    'status',
+    'is_published',
+    'rating',
+    'lessons_count',
+    'approved_by_admin_id',
+    'approved_at',
+    'rejection_reason',
+];
 
     protected $casts = [
         'rating' => 'decimal:1',
@@ -49,7 +49,11 @@ class Tutorial extends Model
         'has_preview' => 'boolean',
         'learning_objectives' => 'array',
         'includes' => 'array',
-        'approved_at' => 'datetime'
+        'approved_at' => 'datetime',
+        'max_capacity' => 'integer',
+        'current_enrollment' => 'integer',
+        'start_date' => 'date',
+        'end_date' => 'date',
     ];
 
     // Relationship with tutor
@@ -64,16 +68,31 @@ class Tutorial extends Model
         return $this->belongsTo(Category::class);
     }
 
-    // Relationship with lessons
-    public function lessons()
-    {
-        return $this->hasMany(Lesson::class)->orderBy('order');
-    }
-
+    // app/Models/Tutorial.php
+public function lessons()
+{
+    return $this->hasMany(Lesson::class)->orderBy('order');
+}
     // Relationship with enrollments
     public function enrollments()
     {
         return $this->hasMany(Enrollment::class);
+    }
+
+    public function course()
+    {
+        return $this->belongsTo(Course::class);
+    }
+
+    // Helper methods
+    public function isFull()
+    {
+        return $this->current_enrollment >= $this->max_capacity;
+    }
+
+    public function availableSeats()
+    {
+        return max(0, $this->max_capacity - $this->current_enrollment);
     }
 
     // Relationship with enrolled students (now no conflict!)
@@ -101,6 +120,12 @@ class Tutorial extends Model
     {
         return $this->enrollments()->count();
     }
+
+    public function enrollmentPercentage()
+{
+    if ($this->max_capacity == 0) return 0;
+    return ($this->current_enrollment / $this->max_capacity) * 100;
+}
 
     public function admin()
     {
@@ -221,5 +246,10 @@ public function markAsInProgress()
 {
     // When tutor accepts assignment
     $this->update(['status' => 'in_progress']);
+}
+
+public function getIsPublishedAttribute(): bool
+{
+    return $this->status === 'published';
 }
 }

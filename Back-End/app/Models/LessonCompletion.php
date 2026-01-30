@@ -1,5 +1,4 @@
 <?php
-// app/Models/LessonCompletion.php
 
 namespace App\Models;
 
@@ -10,10 +9,15 @@ class LessonCompletion extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'lesson_id', 'tutorial_id', 'completed_at'];
+    protected $fillable = [
+        'user_id',
+        'lesson_id',
+        'tutorial_id',
+        'completed_at',
+    ];
 
     protected $casts = [
-        'completed_at' => 'datetime'
+        'completed_at' => 'datetime',
     ];
 
     public function user()

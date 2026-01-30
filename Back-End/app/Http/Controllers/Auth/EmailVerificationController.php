@@ -5,113 +5,132 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\EmailQueue;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Log;
+use App\Mail\StudentWelcomeEmail;
+use App\Mail\TutorWelcomeEmail;
 use App\Mail\EmailVerificationMail;
-use App\Mail\StudentWelcomeMail;
-use App\Mail\TutorPendingApprovalMail;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class EmailVerificationController extends Controller
 {
     /**
-     * Verify email address
+     * Verify email with token
      */
-    public function verify(Request $request, $token = null)
+    public function verify(Request $request, $id, $hash)
     {
-        $token = $token ?? $request->input('token');
-
-        if (!$token) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Verification token is required'
-            ], 400);
+        // The 'signed' middleware already validated signature & expiration
+        // Extra safety check
+        if (!$request->hasValidSignature()) {
+            return redirect('/email/verify/expired')
+                ->with('error', 'This verification link is invalid or has expired.');
         }
 
-        $user = User::where('email_verification_token', $token)->first();
+        $user = User::find($id);
 
         if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid or expired verification token'
-            ], 400);
+            return redirect('/email/verify/expired')
+                ->with('error', 'User not found.');
         }
 
+        // Verify hash matches (security)
+        if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            return redirect('/email/verify/expired')
+                ->with('error', 'Invalid verification link.');
+        }
+
+        // Already verified?
         if ($user->email_verified_at) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Email already verified'
-            ], 400);
+            return redirect($this->getRedirectUrl($user))
+                ->with('info', 'Your email is already verified.');
         }
 
-        // Update user verification status
-        $user->email_verified_at = now();
-        $user->email_verification_token = null;
+        DB::beginTransaction();
 
-        // Handle based on user type
-        if ($user->isStudent()) {
-            $user->status = 'active';
+        try {
+            // Mark as verified
+            $user->email_verified_at = now();
+            // No need for email_verification_token anymore → can be null or dropped
+            $user->email_verification_token = null;
+
+            // Role-based status & welcome email
+            $welcomeEmailSent = false;
+
+            if ($user->role === 'student') {
+                $user->status = 'active';
+
+                $student = $user->student;
+                if ($student) {
+                    Mail::to($user->email)->send(new StudentWelcomeEmail($user, $student));
+                    $welcomeEmailSent = true;
+                    Log::info('Student welcome email sent after verification', ['user_id' => $user->id]);
+                }
+            } elseif ($user->role === 'tutor') {
+                $user->status = 'pending'; // or 'pending' as you prefer
+                $user->save();
+
+                $welcomeEmailSent = false;
+                Log::info('Tutor email verified – now pending admin approval', ['user_id' => $user->id]);
+            } else {
+                $user->status = 'active';
+            }
+
             $user->save();
 
-            // Send welcome email
-            try {
-                Mail::to($user->email)->send(new StudentWelcomeMail($user));
-            } catch (\Exception $e) {
-                Log::error('Failed to send welcome email: ' . $e->getMessage());
+            // Dev queue marking (optional)
+            if (app()->environment('local', 'development', 'testing')) {
+                EmailQueue::where('user_id', $user->id)
+                    ->where('type', 'verification')
+                    ->whereNull('viewed_at')
+                    ->update(['viewed_at' => now()]);
             }
 
-            $message = 'Email verified successfully! Your student account is now active.';
-            $redirect_to = '/dashboard';
-        } else {
-            // For tutors: create tutor record if doesn't exist
-            $user->status = 'pending_approval';
-            $user->save();
+            DB::commit();
 
-            // Create tutor record if it doesn't exist
-            if (!$user->tutor()->exists()) {
-                \App\Models\Tutor::create([
-                    'user_id' => $user->id,
-                    'phone' => $user->phone,
-                    'degree_verified' => 'pending',
-                    'is_verified' => false,
-                ]);
-            }
+                    return redirect($this->getRedirectUrl($user))
+                        ->with('success', $user->role === 'student'
+                            ? 'Email verified! Your account is now active. Redirecting to dashboard...'
+                            : 'Email verified! Your tutor account is under review. You will be notified soon.');
 
-            // Send pending approval notification
-            try {
-                Mail::to($user->email)->send(new TutorPendingApprovalMail($user));
-            } catch (\Exception $e) {
-                Log::error('Failed to send tutor profile completion email: ' . $e->getMessage());
-            }
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Email verification failed', [
+                'user_id' => $user->id ?? null,
+                'error'   => $e->getMessage(),
+                'trace'   => $e->getTraceAsString()
+            ]);
 
-            $message = 'Email verified successfully! Your tutor application is pending admin approval.';
-            $redirect_to = '/tutor/dashboard';
+            return redirect('/email/verify/expired')
+                ->with('error', 'Verification failed. Please try again or contact support.');
         }
-
-        // Mark email as viewed in queue
-        if (app()->environment('local', 'development', 'testing')) {
-            EmailQueue::where('token', $token)
-                ->where('type', 'verification')
-                ->whereNull('viewed_at')
-                ->update(['viewed_at' => now()]);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => $message,
-            'user' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'role' => $user->role,
-                'status' => $user->status,
-                'email_verified' => true,
-            ],
-            'redirect_to' => $redirect_to
-        ]);
     }
 
+   /**
+ * Helper: Get frontend redirect URL based on role
+ */
+private function getRedirectUrl(User $user): string
+{
+    $base = 'http://localhost:5173';
+    return $base . '/?verified=success&role=' . $user->role;
+     
+
+    if ($user->role === 'student') {
+        return $base . '/student?verified=success';
+    }
+
+    if ($user->role === 'tutor') {
+        // Pending approval instead of direct tutor dashboard
+        return $base . '/registration-pending?verified=success&role=tutor';
+    }
+
+    // Fallback
+    return $base . '/';
+}
+
     /**
-     * Resend verification email
+     * Resend verification email (updated to use signed URL)
      */
     public function resend(Request $request)
     {
@@ -123,27 +142,58 @@ class EmailVerificationController extends Controller
 
         if ($user->email_verified_at) {
             return response()->json([
+                'success' => true,
+                'message' => 'Email is already verified.',
+            ], 200);
+        }
+
+        // Generate fresh signed URL
+        $verificationUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addHours(72),
+            [
+                'id'   => $user->getKey(),
+                'hash' => sha1($user->getEmailForVerification()),
+            ]
+        );
+
+        if (app()->environment('local', 'development', 'testing')) {
+            EmailQueue::create([
+                'user_id'          => $user->id,
+                'type'             => 'verification_resend',
+                'to'               => $user->email,
+                'subject'          => 'Resend: Verify Your Email Address',
+                'content'          => "Hello {$user->name},\n\nPlease click to verify:\n\n{$verificationUrl}\n\nExpires in 72 hours.",
+                'verification_url' => $verificationUrl,
+                'sent_at'          => now(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Verification link resent. Check your email queue.',
+                'verification_url' => $verificationUrl, // for dev testing
+            ], 200);
+        }
+
+        // Production send
+        try {
+            Mail::to($user->email)->send(new EmailVerificationMail($user, $verificationUrl));
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Verification email resent. Check your inbox.',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Resend failed: ' . $e->getMessage());
+            return response()->json([
                 'success' => false,
-                'message' => 'Email already verified'
-            ], 400);
+                'message' => 'Failed to resend verification email.',
+            ], 500);
         }
-
-        // Generate new token if needed
-        if (!$user->email_verification_token) {
-            $user->email_verification_token = $this->generateVerificationToken();
-            $user->save();
-        }
-
-        $this->sendVerificationEmail($user);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Verification email resent successfully'
-        ]);
     }
 
     /**
-     * Check registration status
+     * Check verification status (unchanged)
      */
     public function checkStatus(Request $request)
     {
@@ -154,48 +204,11 @@ class EmailVerificationController extends Controller
         $user = User::where('email', $request->email)->first();
 
         return response()->json([
-            'success' => true,
-            'user' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'role' => $user->role,
-                'status' => $user->status,
-                'email_verified' => !is_null($user->email_verified_at),
-                'can_login' => $user->canLogin(),
-            ]
-        ]);
-    }
-
-    /**
-     * Helper: Generate verification token
-     */
-    private function generateVerificationToken(): string
-    {
-        return bin2hex(random_bytes(32));
-    }
-
-    /**
-     * Helper: Send verification email
-     */
-    private function sendVerificationEmail(User $user)
-    {
-        $verificationUrl = url('/api/verify-email/' . $user->email_verification_token);
-
-        if (app()->environment('local', 'development', 'testing')) {
-            // Store in email queue for development
-            EmailQueue::create([
-                'user_id' => $user->id,
-                'type' => 'verification',
-                'to' => $user->email,
-                'subject' => 'Verify Your Email Address',
-                'content' => "Hello {$user->name},\n\nPlease verify your email: {$verificationUrl}",
-                'token' => $user->email_verification_token,
-                'verification_url' => $verificationUrl,
-                'sent_at' => now(),
-            ]);
-        } else {
-            // Send real email in production
-            Mail::to($user->email)->send(new EmailVerificationMail($user));
-        }
+            'success'         => true,
+            'email_verified'  => !is_null($user->email_verified_at),
+            'status'          => $user->status,
+            'role'            => $user->role,
+            'needs_verification' => is_null($user->email_verified_at),
+        ], 200);
     }
 }

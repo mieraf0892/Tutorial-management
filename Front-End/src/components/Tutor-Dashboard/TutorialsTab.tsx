@@ -1,9 +1,8 @@
+// components/Tutor-Dashboard/TutorialsTab.tsx - UPDATED STATUS MESSAGE SECTION
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Plus, 
-  Users, 
   Calendar, 
   Clock, 
   CheckCircle, 
@@ -14,7 +13,13 @@ import {
   EyeOff,
   Pencil,
   Trash2,
-  Eye
+  Eye,
+  RefreshCw,
+  FileText,
+  Users,
+  Download,
+  ExternalLink,
+  MessageSquare
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -30,27 +35,37 @@ interface Tutorial {
   total_sessions: number;
   completed_sessions: number;
   created_at: string;
-  status: string; // Add this - 'draft', 'pending_approval', 'approved', 'published', 'rejected'
-  is_published?: boolean; // Keep for backward compatibility
+  status: 'draft' | 'pending_approval' | 'approved' | 'published' | 'rejected' | 'archived';
+  is_published?: boolean;
   created_by_role?: 'tutor' | 'admin';
   admin_id?: number;
   approved_by_admin_id?: number;
   approved_at?: string;
   rejection_reason?: string;
+  course_id?: number;
+  course_title?: string;
+  batch_name?: string;
+  schedule?: string;
+  start_date?: string;
+  duration_hours?: number;
+  level?: string;
+  learning_outcomes?: string[];
+  requirements?: string[];
+  instructor_bio?: string;
 }
 
 interface TutorialsTabProps {
   tutorials: Tutorial[];
-  onCreateTutorial: () => void;
   onTutorialUpdate?: () => void;
 }
 
-export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUpdate }: TutorialsTabProps) {
+export default function TutorialsTab({ tutorials, onTutorialUpdate }: TutorialsTabProps) {
   const { toast } = useToast();
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [submittingId, setSubmittingId] = useState<number | null>(null);
 
   const getStatusBadge = (tutorial: Tutorial) => {
-    const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
+    const status = tutorial.status ?? 'draft'; // or throw if undefined, but fallback to draft is fine
     
     switch (status) {
       case 'published':
@@ -69,8 +84,8 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
         );
       case 'draft':
         return (
-          <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
-            <AlertCircle className="w-3 h-3 mr-1" />
+          <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-300">
+            <FileText className="w-3 h-3 mr-1" />
             Draft
           </Badge>
         );
@@ -89,6 +104,11 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
             <CheckCircle className="w-3 h-3 mr-1" />
             Approved
+            {tutorial.approved_at && (
+              <span className="ml-1 text-xs">
+                {new Date(tutorial.approved_at).toLocaleDateString()}
+              </span>
+            )}
           </Badge>
         );
       case 'archived':
@@ -104,62 +124,50 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
     }
   };
 
-  const handlePublishTutorial = async (tutorialId: number) => {
+  const handleSubmitForApproval = async (tutorialId: number) => {
     try {
-      const response = await apiClient.patch(`/tutor/tutorials/${tutorialId}/publish`);
+      setSubmittingId(tutorialId);
+      const response = await apiClient.post(`/tutor/tutorials/${tutorialId}/submit-approval`);
       
       if (response.data.success) {
         toast({
-          title: "Success!",
-          description: "Tutorial published successfully",
+          title: "Submitted!",
+          description: "Tutorial submitted for admin approval. You'll be notified when reviewed.",
         });
         onTutorialUpdate?.();
       } else {
-        throw new Error(response.data.message || "Failed to publish tutorial");
+        throw new Error(response.data.message || "Failed to submit tutorial");
       }
     } catch (error: any) {
-      console.error("Publish tutorial error:", error);
+      console.error("Submit tutorial error:", error);
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to publish tutorial",
+        description: error.response?.data?.message || "Failed to submit tutorial for approval",
         variant: "destructive",
       });
-    }
-  };
-
-  const handleUnpublishTutorial = async (tutorialId: number) => {
-    try {
-      const response = await apiClient.patch(`/tutor/tutorials/${tutorialId}/unpublish`);
-      
-      if (response.data.success) {
-        toast({
-          title: "Success!",
-          description: "Tutorial unpublished successfully",
-        });
-        onTutorialUpdate?.();
-      } else {
-        throw new Error(response.data.message || "Failed to unpublish tutorial");
-      }
-    } catch (error: any) {
-      console.error("Unpublish tutorial error:", error);
-      toast({
-        title: "Error",
-        description: error.response?.data?.message || "Failed to unpublish tutorial",
-        variant: "destructive",
-      });
+    } finally {
+      setSubmittingId(null);
     }
   };
 
   const handleEditTutorial = (tutorialId: number) => {
-    // Navigate to edit page or open edit dialog
     toast({
       title: "Edit Tutorial",
       description: `Editing tutorial #${tutorialId}`,
+      action: (
+        <Button 
+          variant="outline" 
+          size="sm"
+          onClick={() => window.open(`/tutor/tutorials/${tutorialId}/edit`, '_blank')}
+        >
+          Open Editor
+        </Button>
+      ),
     });
   };
 
   const handleDeleteTutorial = async (tutorialId: number) => {
-    if (!confirm("Are you sure you want to delete this tutorial? This action cannot be undone.")) {
+    if (!confirm("Are you sure you want to delete this tutorial content package? This action cannot be undone.")) {
       return;
     }
 
@@ -170,7 +178,7 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
       if (response.data.success) {
         toast({
           title: "Deleted!",
-          description: "Tutorial deleted successfully",
+          description: "Tutorial content package deleted successfully",
         });
         onTutorialUpdate?.();
       } else {
@@ -189,69 +197,86 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
   };
 
   const handleViewDetails = (tutorialId: number) => {
-    // Navigate to tutorial details page
     toast({
       title: "View Details",
       description: `Viewing tutorial #${tutorialId} details`,
     });
   };
 
-  const canEditTutorial = (tutorial: Tutorial) => {
-    // Tutors can edit drafts, rejected, or their own tutorials
-    // Cannot edit if status is 'published' or 'pending_approval'
-    const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
-    return ['draft', 'rejected', 'approved'].includes(status);
+  const handleDownloadContent = (tutorial: Tutorial) => {
+    toast({
+      title: "Download Content",
+      description: `Downloading content package for "${tutorial.title}"`,
+    });
   };
 
-  const canPublishTutorial = (tutorial: Tutorial) => {
-    // Only approved tutorials can be published by tutors
-    const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
-    return status === 'approved' || status === 'draft';
+  const canEditTutorial = (tutorial: Tutorial) => {
+    return ['draft', 'rejected'].includes(tutorial.status);
+  };
+
+  const canSubmitTutorial = (tutorial: Tutorial) => {
+    return tutorial.status === 'draft';
   };
 
   const canDeleteTutorial = (tutorial: Tutorial) => {
-    // Only drafts or rejected tutorials can be deleted
-    const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
-    return ['draft', 'rejected'].includes(status);
+    return ['draft', 'rejected'].includes(tutorial.status);
+  };
+
+  const getStatusMessage = (tutorial: Tutorial) => {
+    switch (tutorial.status) {
+      case 'draft':
+        return "Save your work and submit for admin approval when ready.";
+      case 'pending_approval':
+        return "Waiting for admin review. You'll be notified when approved.";
+      case 'approved':
+        return "Approved by admin! This content is ready to be assigned to students.";
+      case 'published':
+        return "Published! This content is now available for student assignments.";
+      case 'rejected':
+        return tutorial.rejection_reason 
+          ? `Rejected: ${tutorial.rejection_reason}`
+          : "Rejected by admin. Please review and resubmit.";
+      default:
+        return "";
+    }
   };
 
   // Filter tutorials for display
   const filteredTutorials = tutorials.filter(tutorial => {
-    const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
-    // Show all except archived
-    return status !== 'archived';
+    return tutorial.status !== 'archived';
   });
 
   // Group tutorials by status
-  const publishedTutorials = filteredTutorials.filter(t => 
-    (t.status || (t.is_published ? 'published' : 'draft')) === 'published'
-  );
-  const pendingTutorials = filteredTutorials.filter(t => 
-    (t.status || (t.is_published ? 'published' : 'draft')) === 'pending_approval'
-  );
-  const draftTutorials = filteredTutorials.filter(t => 
-    (t.status || (t.is_published ? 'published' : 'draft')) === 'draft'
-  );
-  const rejectedTutorials = filteredTutorials.filter(t => 
-    (t.status || (t.is_published ? 'published' : 'draft')) === 'rejected'
-  );
-  const approvedTutorials = filteredTutorials.filter(t => 
-    (t.status || (t.is_published ? 'published' : 'draft')) === 'approved'
-  );
+  const publishedTutorials = filteredTutorials.filter(t => t.status === 'published');
+  const approvedTutorials = filteredTutorials.filter(t => t.status === 'approved');
+  const pendingTutorials = filteredTutorials.filter(t => t.status === 'pending_approval');
+  const draftTutorials = filteredTutorials.filter(t => t.status === 'draft');
+  const rejectedTutorials = filteredTutorials.filter(t => t.status === 'rejected');
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
 
   return (
     <div className="space-y-6">
+      {/* HEADER */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">My Tutorials</h2>
+          <h2 className="text-2xl font-bold text-foreground">My Content Packages</h2>
           <p className="text-muted-foreground">
-            Manage your tutorials. New tutorials require admin approval.
+            Create, manage, and submit tutorial content for admin approval
           </p>
         </div>
-        <Button onClick={onCreateTutorial}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Tutorial
-        </Button>
+        {onTutorialUpdate && (
+          <Button variant="outline" onClick={onTutorialUpdate} className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </Button>
+        )}
       </div>
 
       {/* Status Summary */}
@@ -259,34 +284,42 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
         <Card className="text-center p-4">
           <div className="text-2xl font-bold">{publishedTutorials.length}</div>
           <div className="text-sm text-muted-foreground">Published</div>
-        </Card>
-        <Card className="text-center p-4">
-          <div className="text-2xl font-bold">{pendingTutorials.length}</div>
-          <div className="text-sm text-muted-foreground">Pending</div>
+          <div className="text-xs text-green-600 mt-1">Ready for students</div>
         </Card>
         <Card className="text-center p-4">
           <div className="text-2xl font-bold">{approvedTutorials.length}</div>
           <div className="text-sm text-muted-foreground">Approved</div>
+          <div className="text-xs text-blue-600 mt-1">Admin approved</div>
+        </Card>
+        <Card className="text-center p-4">
+          <div className="text-2xl font-bold">{pendingTutorials.length}</div>
+          <div className="text-sm text-muted-foreground">Pending</div>
+          <div className="text-xs text-yellow-600 mt-1">Under review</div>
         </Card>
         <Card className="text-center p-4">
           <div className="text-2xl font-bold">{draftTutorials.length}</div>
           <div className="text-sm text-muted-foreground">Drafts</div>
+          <div className="text-xs text-gray-600 mt-1">In progress</div>
         </Card>
         <Card className="text-center p-4">
           <div className="text-2xl font-bold">{rejectedTutorials.length}</div>
           <div className="text-sm text-muted-foreground">Rejected</div>
+          <div className="text-xs text-red-600 mt-1">Needs revision</div>
         </Card>
       </div>
 
       {/* Tutorials List */}
       {filteredTutorials.length > 0 ? (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {/* Published Tutorials */}
           {publishedTutorials.length > 0 && (
             <div className="space-y-3">
               <h3 className="text-lg font-medium flex items-center gap-2">
                 <CheckCircle className="w-5 h-5 text-green-500" />
-                Published Tutorials ({publishedTutorials.length})
+                Published Content ({publishedTutorials.length})
+                <Badge variant="outline" className="ml-2 bg-green-50 text-green-700">
+                  Ready for Students
+                </Badge>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {publishedTutorials.map((tutorial) => (
@@ -294,13 +327,40 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
                     key={tutorial.id}
                     tutorial={tutorial}
                     getStatusBadge={getStatusBadge}
-                    onUnpublish={handleUnpublishTutorial}
+                    getStatusMessage={getStatusMessage}
                     onEdit={handleEditTutorial}
-                    onDelete={handleDeleteTutorial}
                     onView={handleViewDetails}
+                    onDownload={handleDownloadContent}
                     canEdit={canEditTutorial(tutorial)}
-                    canDelete={canDeleteTutorial(tutorial)}
-                    deletingId={deletingId}
+                    formatDate={formatDate}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Approved Tutorials */}
+          {approvedTutorials.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-lg font-medium flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-blue-500" />
+                Approved Content ({approvedTutorials.length})
+                <Badge variant="outline" className="ml-2 bg-blue-50 text-blue-700">
+                  Awaiting Publication
+                </Badge>
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {approvedTutorials.map((tutorial) => (
+                  <TutorialCard 
+                    key={tutorial.id}
+                    tutorial={tutorial}
+                    getStatusBadge={getStatusBadge}
+                    getStatusMessage={getStatusMessage}
+                    onEdit={handleEditTutorial}
+                    onView={handleViewDetails}
+                    onDownload={handleDownloadContent}
+                    canEdit={canEditTutorial(tutorial)}
+                    formatDate={formatDate}
                   />
                 ))}
               </div>
@@ -312,7 +372,10 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
             <div className="space-y-3">
               <h3 className="text-lg font-medium flex items-center gap-2">
                 <Clock className="w-5 h-5 text-yellow-500" />
-                Waiting for Approval ({pendingTutorials.length})
+                Under Review ({pendingTutorials.length})
+                <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700">
+                  Awaiting Admin
+                </Badge>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {pendingTutorials.map((tutorial) => (
@@ -320,40 +383,11 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
                     key={tutorial.id}
                     tutorial={tutorial}
                     getStatusBadge={getStatusBadge}
+                    getStatusMessage={getStatusMessage}
                     onEdit={handleEditTutorial}
-                    onDelete={handleDeleteTutorial}
                     onView={handleViewDetails}
                     canEdit={canEditTutorial(tutorial)}
-                    canDelete={canDeleteTutorial(tutorial)}
-                    deletingId={deletingId}
-                    showMessage="Waiting for admin approval"
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Approved Tutorials (can be published) */}
-          {approvedTutorials.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-lg font-medium flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 text-blue-500" />
-                Approved - Ready to Publish ({approvedTutorials.length})
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {approvedTutorials.map((tutorial) => (
-                  <TutorialCard 
-                    key={tutorial.id}
-                    tutorial={tutorial}
-                    getStatusBadge={getStatusBadge}
-                    onPublish={handlePublishTutorial}
-                    onEdit={handleEditTutorial}
-                    onDelete={handleDeleteTutorial}
-                    onView={handleViewDetails}
-                    canEdit={canEditTutorial(tutorial)}
-                    canDelete={canDeleteTutorial(tutorial)}
-                    deletingId={deletingId}
-                    showMessage="Approved by admin - ready to publish"
+                    formatDate={formatDate}
                   />
                 ))}
               </div>
@@ -364,8 +398,11 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
           {draftTutorials.length > 0 && (
             <div className="space-y-3">
               <h3 className="text-lg font-medium flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-gray-500" />
+                <FileText className="w-5 h-5 text-gray-500" />
                 Drafts ({draftTutorials.length})
+                <Badge variant="outline" className="ml-2 bg-gray-100 text-gray-700">
+                  In Progress
+                </Badge>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {draftTutorials.map((tutorial) => (
@@ -373,12 +410,17 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
                     key={tutorial.id}
                     tutorial={tutorial}
                     getStatusBadge={getStatusBadge}
+                    getStatusMessage={getStatusMessage}
                     onEdit={handleEditTutorial}
+                    onSubmit={handleSubmitForApproval}
                     onDelete={handleDeleteTutorial}
                     onView={handleViewDetails}
                     canEdit={canEditTutorial(tutorial)}
+                    canSubmit={canSubmitTutorial(tutorial)}
                     canDelete={canDeleteTutorial(tutorial)}
                     deletingId={deletingId}
+                    submittingId={submittingId}
+                    formatDate={formatDate}
                   />
                 ))}
               </div>
@@ -390,7 +432,10 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
             <div className="space-y-3">
               <h3 className="text-lg font-medium flex items-center gap-2">
                 <XCircle className="w-5 h-5 text-red-500" />
-                Rejected Tutorials ({rejectedTutorials.length})
+                Needs Revision ({rejectedTutorials.length})
+                <Badge variant="outline" className="ml-2 bg-red-50 text-red-700">
+                  Requires Updates
+                </Badge>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {rejectedTutorials.map((tutorial) => (
@@ -398,13 +443,17 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
                     key={tutorial.id}
                     tutorial={tutorial}
                     getStatusBadge={getStatusBadge}
+                    getStatusMessage={getStatusMessage}
                     onEdit={handleEditTutorial}
+                    onSubmit={handleSubmitForApproval}
                     onDelete={handleDeleteTutorial}
                     onView={handleViewDetails}
                     canEdit={canEditTutorial(tutorial)}
+                    canSubmit={canSubmitTutorial(tutorial)}
                     canDelete={canDeleteTutorial(tutorial)}
                     deletingId={deletingId}
-                    showMessage={tutorial.rejection_reason ? `Rejected: ${tutorial.rejection_reason}` : "Rejected by admin"}
+                    submittingId={submittingId}
+                    formatDate={formatDate}
                   />
                 ))}
               </div>
@@ -415,12 +464,18 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
         <Card className="text-center py-12 bg-card border-border">
           <CardContent>
             <BookOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">No tutorials yet</h3>
-            <p className="text-muted-foreground mb-4">Create your first tutorial to start teaching</p>
-            <Button onClick={onCreateTutorial}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Your First Tutorial
-            </Button>
+            <h3 className="text-lg font-medium text-foreground mb-2">No Content Packages Yet</h3>
+            <p className="text-muted-foreground mb-4">
+              Create your first tutorial content package from the "My Courses" tab.
+              <br />
+              Once created, you can submit it for admin approval here.
+            </p>
+            {onTutorialUpdate && (
+              <Button variant="outline" onClick={onTutorialUpdate} className="mt-2">
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh List
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -428,97 +483,159 @@ export default function TutorialsTab({ tutorials, onCreateTutorial, onTutorialUp
   );
 }
 
-// Separate TutorialCard component for better organization
+// UPDATED TutorialCard component with new approved status message
 function TutorialCard({ 
   tutorial, 
   getStatusBadge, 
-  onPublish, 
-  onUnpublish, 
+  getStatusMessage,
+  onSubmit,
   onEdit, 
   onDelete, 
   onView,
+  onDownload,
   canEdit,
+  canSubmit,
   canDelete,
   deletingId,
-  showMessage
+  submittingId,
+  formatDate
 }: any) {
-  const status = tutorial.status || (tutorial.is_published ? 'published' : 'draft');
-
   return (
-    <Card className="hover:shadow-lg transition-shadow bg-card border-border">
+    <Card className="hover:shadow-md transition-shadow bg-card border-border">
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
-          <div>
-            <CardTitle className="text-lg text-foreground">{tutorial.title}</CardTitle>
-            <CardDescription className="line-clamp-2 mt-1">
+          <div className="space-y-1">
+            <CardTitle className="text-lg text-foreground line-clamp-1">{tutorial.title}</CardTitle>
+            <CardDescription className="line-clamp-2 text-sm">
               {tutorial.description}
             </CardDescription>
+            {tutorial.course_title && (
+              <div className="mt-2">
+                <Badge variant="secondary" className="text-xs bg-blue-50 text-blue-700">
+                  <BookOpen className="w-3 h-3 mr-1" />
+                  Course: {tutorial.course_title}
+                </Badge>
+              </div>
+            )}
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <Badge variant="secondary" className="bg-muted text-muted-foreground">
-              {tutorial.category}
-            </Badge>
+          <div>
             {getStatusBadge(tutorial)}
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Users className="w-4 h-4" />
-              <span>{tutorial.student_count} students</span>
-            </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Calendar className="w-4 h-4" />
-              <span>{tutorial.completed_sessions}/{tutorial.total_sessions} sessions</span>
-            </div>
+          {/* Content Info */}
+          <div className="flex flex-wrap gap-2 text-sm">
+            {tutorial.level && (
+              <Badge variant="outline" className="text-xs">
+                Level: {tutorial.level}
+              </Badge>
+            )}
+            {tutorial.duration_hours && (
+              <Badge variant="outline" className="text-xs">
+                <Clock className="w-3 h-3 mr-1" />
+                {tutorial.duration_hours}h
+              </Badge>
+            )}
+            {tutorial.batch_name && (
+              <Badge variant="outline" className="text-xs">
+                Batch: {tutorial.batch_name}
+              </Badge>
+            )}
           </div>
-          
-          {showMessage && (
-            <div className={`p-2 rounded text-sm ${
-              status === 'pending_approval' ? 'bg-yellow-50 text-yellow-700' :
-              status === 'rejected' ? 'bg-red-50 text-red-700' :
-              status === 'approved' ? 'bg-blue-50 text-blue-700' :
-              'bg-gray-50 text-gray-700'
+
+          {/* Status Message - UPDATED SECTION */}
+          {tutorial.status === 'approved' ? (
+            <div className="text-sm text-blue-700 bg-blue-50 p-3 rounded border border-blue-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                <div>
+                  <p className="font-medium">Approved by admin</p>
+                  <p className="text-xs mt-1">
+                    Waiting for admin to publish. Once published, it will appear in the course for students.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className={`p-3 rounded text-sm ${
+              tutorial.status === 'pending_approval' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' :
+              tutorial.status === 'rejected' ? 'bg-red-50 text-red-700 border border-red-200' :
+              tutorial.status === 'published' ? 'bg-green-50 text-green-700 border border-green-200' :
+              'bg-gray-50 text-gray-700 border border-gray-200'
             }`}>
-              {showMessage}
+              <div className="flex items-start gap-2">
+                {tutorial.status === 'pending_approval' && <Clock className="w-4 h-4 mt-0.5" />}
+                {tutorial.status === 'rejected' && <XCircle className="w-4 h-4 mt-0.5" />}
+                {tutorial.status === 'published' && <CheckCircle className="w-4 h-4 mt-0.5" />}
+                <div>
+                  <p className="font-medium">{getStatusMessage(tutorial)}</p>
+                  {tutorial.status === 'rejected' && tutorial.rejection_reason && (
+                    <p className="mt-1 text-xs">Feedback: {tutorial.rejection_reason}</p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 pt-2">
-            {status === 'published' ? (
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => onUnpublish?.(tutorial.id)}
-                className="flex-1"
-              >
-                <EyeOff className="w-3 h-3 mr-1" />
-                Unpublish
-              </Button>
-            ) : status === 'approved' ? (
+          <div className="flex flex-wrap gap-2 pt-2">
+            {tutorial.status === 'draft' && canSubmit && (
               <Button 
                 size="sm"
-                onClick={() => onPublish?.(tutorial.id)}
+                onClick={() => onSubmit?.(tutorial.id)}
+                disabled={submittingId === tutorial.id}
                 className="flex-1"
               >
-                <Globe className="w-3 h-3 mr-1" />
-                Publish Now
+                {submittingId === tutorial.id ? (
+                  <>
+                    <Clock className="w-3 h-3 mr-1 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare className="w-3 h-3 mr-1" />
+                    Submit for Approval
+                  </>
+                )}
               </Button>
-            ) : status === 'draft' ? (
+            )}
+
+            {tutorial.status === 'rejected' && canSubmit && (
               <Button 
-                variant="outline" 
                 size="sm"
-                onClick={() => onEdit?.(tutorial.id)}
+                onClick={() => onSubmit?.(tutorial.id)}
+                disabled={submittingId === tutorial.id}
                 className="flex-1"
               >
-                <Pencil className="w-3 h-3 mr-1" />
-                Edit
+                {submittingId === tutorial.id ? (
+                  <>
+                    <Clock className="w-3 h-3 mr-1 animate-spin" />
+                    Resubmitting...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    Resubmit for Approval
+                  </>
+                )}
               </Button>
-            ) : null}
-            
+            )}
+
+            {tutorial.status === 'published' && onDownload && (
+              <Button 
+                variant="outline"
+                size="sm"
+                onClick={() => onDownload?.(tutorial)}
+                className="flex-1"
+              >
+                <Download className="w-3 h-3 mr-1" />
+                Download Content
+              </Button>
+            )}
+
+            {/* View Details */}
             <Button 
               variant="ghost" 
               size="sm"
@@ -527,6 +644,7 @@ function TutorialCard({
               <Eye className="w-3 h-3" />
             </Button>
             
+            {/* Edit (for drafts/rejected) */}
             {canEdit && (
               <Button 
                 variant="ghost" 
@@ -537,6 +655,7 @@ function TutorialCard({
               </Button>
             )}
             
+            {/* Delete (for drafts/rejected) */}
             {canDelete && (
               <Button 
                 variant="ghost" 
@@ -551,14 +670,28 @@ function TutorialCard({
                 )}
               </Button>
             )}
+
+            {/* External link for published content */}
+            {tutorial.status === 'published' && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => window.open(`/tutorials/${tutorial.id}`, '_blank')}
+              >
+                <ExternalLink className="w-3 h-3" />
+              </Button>
+            )}
           </div>
 
+          {/* Footer info */}
           <div className="flex justify-between text-xs text-muted-foreground pt-2 border-t border-border">
             <span>
-              Created {new Date(tutorial.created_at).toLocaleDateString()}
+              Created {formatDate(tutorial.created_at)}
             </span>
-            {tutorial.created_by_role === 'admin' && (
-              <span className="text-blue-600">Assigned by Admin</span>
+            {tutorial.approved_at && (
+              <span className="text-blue-600">
+                Approved {formatDate(tutorial.approved_at)}
+              </span>
             )}
           </div>
         </div>

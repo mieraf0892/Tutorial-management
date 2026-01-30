@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Models\Enrollment;
 use App\Models\Tutorial;
+use App\Models\Course;
+use App\Models\StudentCourseDetail;
 use App\Models\LessonCompletion;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -544,4 +546,145 @@ public function enrolledTutorials()
         ], 500);
     }
 }
+
+// In StudentController or new controller
+public function getRecommendedCourses(Request $request)
+{
+    $student = Student::where('user_id', $request->user()->id)->first();
+    
+    if (!$student) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Student not found'
+        ], 404);
+    }
+    
+    // Get courses matching student's course_type
+    $courses = Course::where('category', $student->course_type)
+                    ->where('is_active', true)
+                    ->get();
+    
+    // Also check StudentCourseDetail for specific interests
+    $specificInterests = StudentCourseDetail::where('student_id', $student->id)
+                                          ->pluck('field_value');
+    
+    return response()->json([
+        'success' => true,
+        'data' => [
+            'courses' => $courses,
+            'student_preference' => $student->learningPreference?->learning_preference,
+            'specific_interests' => $specificInterests
+        ]
+    ]);
+}
+
+public function getPreferences(Request $request)
+{
+    try {
+        $user = $request->user();
+        
+        // Get student with learning preferences
+        $student = \App\Models\Student::with(['learningPreferences', 'courseDetails'])
+                     ->where('user_id', $user->id)
+                     ->first();
+        
+        if (!$student) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Student profile not found'
+            ], 404);
+        }
+        
+        // Map course type to match categories
+        $courseType = $student->course_type;
+        $categoryMap = [
+            'programming' => 'programming',
+            'language' => 'languages',
+            'school grades' => 'school-grades',
+            'entrance preparation' => 'entrance-exams',
+        ];
+        
+        $mappedCategory = $categoryMap[strtolower($courseType)] ?? $courseType;
+        
+        // Clean the emoji from subcategory values
+        $cleanEmoji = function($value) {
+            return trim(str_replace(['🧠', '💻', '📱', '🇪🇹', '🇬🇧', '🇨🇳', '🇸🇦', '🇫🇷'], '', $value));
+        };
+        
+        // Get ALL subcategories based on course type
+        $subcategories = [];
+        $specificInterests = [];
+        
+        foreach ($student->courseDetails as $detail) {
+            $cleanValue = $cleanEmoji($detail->field_value);
+            
+            // Programming subcategories (AI 🧠, Web 💻, App 📱)
+            if ($courseType === 'Programming' && strpos($detail->field_type, 'programming') !== false) {
+                $subcategories[] = $cleanValue;
+            }
+            // Language subcategories
+            elseif ($courseType === 'Language' && strpos($detail->field_type, 'selectedLanguages') !== false) {
+                $subcategories[] = $cleanValue;
+            }
+            // School grades subcategories
+            elseif ($courseType === 'School Grades') {
+                if ($detail->field_type === 'selectedGrade') {
+                    $subcategories[] = 'Grade ' . $cleanValue;
+                } elseif (strpos($detail->field_type, 'selectedSubjects') !== false) {
+                    $specificInterests[] = $cleanValue;
+                }
+            }
+            // Entrance exams subcategories
+            elseif ($courseType === 'Entrance Preparation' && strpos($detail->field_type, 'selectedExam') !== false) {
+                $subcategories[] = $cleanValue;
+            }
+            
+            // For any field, add to specific interests
+            $specificInterests[] = $cleanValue;
+        }
+        
+        // Remove duplicates and empty values
+        $subcategories = array_values(array_unique(array_filter($subcategories)));
+        $specificInterests = array_values(array_unique(array_filter($specificInterests)));
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Preferences retrieved successfully',
+            'data' => [
+                'course_type' => $mappedCategory,
+                'learning_preference' => $student->learningPreferences?->learning_preference ?? 'group',
+                'preferred_days' => $student->learningPreferences?->study_days ?? [],
+                'hours_per_day' => $student->learningPreferences?->hours_per_day ?? 1,
+                'learning_mode' => $student->learningPreferences?->learning_mode ?? 'online',
+                'raw_course_type' => $student->course_type,
+                'subcategories' => $subcategories, // Changed from subcategory to subcategories (array)
+                'primary_subcategory' => !empty($subcategories) ? $subcategories[0] : null,
+                'specific_interests' => $specificInterests,
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Failed to retrieve preferences: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to retrieve preferences',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+    public function index(): JsonResponse // 2. This now points to the Illuminate version
+    {
+        try {
+            // Fetch students with their associated user data
+            $students = Student::with('user')->get();
+            
+            return response()->json($students);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error fetching students',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

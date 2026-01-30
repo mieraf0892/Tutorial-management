@@ -14,11 +14,14 @@ import {
   Sparkles, 
   Clock,
   Users,
-  Star
+  Star,
+  GraduationCap,
+  BookOpen
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/api";
 import { motion } from "framer-motion";
+import CourseCard from "@/components/CourseCard";
 
 interface Category {
   id: number;
@@ -27,6 +30,27 @@ interface Category {
   description?: string;
   tutorial_count: number;
   icon_name: string;
+}
+
+// 1. Change state & interface
+interface Course {
+  id: number;
+  title: string;
+  description: string;
+  category: string;
+  duration_hours?: number;
+  price_group?: string | number;
+  price_individual?: string | number;
+  students?: number;
+  rating?: number;
+  image?: string;
+  is_featured?: boolean;
+}
+
+interface HomepageStats {
+  total_students: number;
+  total_courses: number;
+  total_tutorials: number;
 }
 
 interface Instructor {
@@ -122,6 +146,10 @@ const itemVariants = {
 const Home = () => {
   const [featuredTutorials, setFeaturedTutorials] = useState<Tutorial[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [stats, setStats] = useState<HomepageStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [featuredCourses, setFeaturedCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState({
     tutorials: true,
     categories: true
@@ -134,6 +162,56 @@ const Home = () => {
     categories: null
   });
   const navigate = useNavigate();
+
+  // Fetch homepage stats
+  useEffect(() => {
+    const fetchHomepageStats = async () => {
+      try {
+        setStatsLoading(true);
+        setStatsError(null);
+        
+        const response = await apiClient.get<{
+          success: boolean;
+          data: HomepageStats;
+          message?: string;
+        }>('/homepage-stats');
+        
+        if (response.data.success) {
+          setStats(response.data.data);
+        } else {
+          setStatsError(response.data.message || 'Failed to load statistics');
+        }
+      } catch (error) {
+        console.error('Error fetching homepage stats:', error);
+        setStatsError('Could not load statistics. Please try again later.');
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchHomepageStats();
+  }, []);
+
+  const fetchFeaturedCourses = async () => {
+  try {
+    setLoading(prev => ({ ...prev, tutorials: true })); // rename to courses later
+    let response = await apiClient.get('/courses', {
+      params: { featured: true, limit: 6 }
+    });
+
+    // Adjust based on your actual response structure
+    const courses = response.data.success 
+      ? (response.data.courses || response.data.data || [])
+      : [];
+
+    setFeaturedCourses(courses.slice(0, 6));
+  } catch (error) {
+    console.error('Error fetching courses:', error);
+    setFeaturedCourses([]);
+  } finally {
+    setLoading(prev => ({ ...prev, tutorials: false }));
+  }
+};
 
   // Memoized tutorial transformation
   const transformTutorialData = useCallback((tutorial: Tutorial) => ({
@@ -201,17 +279,17 @@ const Home = () => {
           
           setFeaturedTutorials(tutorials);
         } else {
-          // Fallback to mock data if API fails
-          console.log('Using fallback tutorial data');
-          setFeaturedTutorials(getMockTutorials());
+          // No fallback data - just log and set empty array
+          console.log('No featured tutorials found in API response');
+          setFeaturedTutorials([]);
         }
       } catch (error) {
         console.error('Error fetching tutorials:', error);
-        // Fallback to mock data
-        setFeaturedTutorials(getMockTutorials());
+        // No fallback data - empty array on error
+        setFeaturedTutorials([]);
         setError(prev => ({
           ...prev,
-          tutorials: 'Using demo data. Some features may be limited.'
+          tutorials: 'Could not load featured tutorials.'
         }));
       } finally {
         setLoading(prev => ({ ...prev, tutorials: false }));
@@ -221,7 +299,7 @@ const Home = () => {
     fetchFeaturedTutorials();
   }, []);
 
-  // Fetch categories with fallback
+  // Fetch categories
   useEffect(() => {
     const fetchCategories = async () => {
       try {
@@ -232,8 +310,9 @@ const Home = () => {
         try {
           response = await apiClient.get<ApiResponse<Category[]>>('/categories');
         } catch (categoriesError) {
-          console.log('Categories endpoint not found, using static data...');
-          throw categoriesError; // Will trigger the catch block below
+          console.log('Categories endpoint not found');
+          setCategories([]);
+          return;
         }
         
         let categoriesData: Category[] = [];
@@ -249,17 +328,12 @@ const Home = () => {
               : [response.data.categories];
           }
           setCategories(categoriesData);
+        } else {
+          setCategories([]);
         }
       } catch (error) {
         console.error('Error fetching categories:', error);
-        // Fallback to static categories
-        setCategories(STATIC_CATEGORIES.map((cat, index) => ({
-          id: index + 1,
-          name: cat.name,
-          slug: cat.slug,
-          tutorial_count: Math.floor(Math.random() * 500) + 100,
-          icon_name: cat.name.toLowerCase().replace(' ', '-')
-        })));
+        setCategories([]);
       } finally {
         setLoading(prev => ({ ...prev, categories: false }));
       }
@@ -283,7 +357,7 @@ const Home = () => {
           id: index + 1,
           name: cat.name,
           slug: cat.slug,
-          tutorial_count: Math.floor(Math.random() * 500) + 100,
+          tutorial_count: 0, // Changed from random number to 0
           description: cat.description,
           icon: cat.icon
         }));
@@ -445,37 +519,43 @@ const Home = () => {
                 </div>
               )}
               
-              {featuredTutorials.length > 0 ? (
-                <motion.div
-                  variants={containerVariants}
-                  initial="hidden"
-                  whileInView="visible"
-                  viewport={{ once: true, margin: "-50px" }}
-                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                >
-                  {featuredTutorials.map((tutorial) => (
-                    <motion.div
-                      key={tutorial.id}
-                      variants={itemVariants}
-                      whileHover={{ y: -8 }}
-                      transition={{ type: "spring", stiffness: 300 }}
-                    >
-                      <TutorialCard 
-                        {...transformTutorialData(tutorial)}
-                        onClick={() => handleTutorialClick(tutorial.id.toString())}
-                        isInteractive
-                      />
-                    </motion.div>
-                  ))}
-                </motion.div>
+              <motion.div
+  variants={containerVariants}
+  initial="hidden"
+  whileInView="visible"
+  viewport={{ once: true, margin: "-50px" }}
+  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+>
+  {featuredCourses.map((course) => (
+    <motion.div
+      key={course.id}
+      variants={itemVariants}
+      whileHover={{ y: -8 }}
+      transition={{ type: "spring", stiffness: 300 }}
+    >
+      <CourseCard 
+        id={course.id}
+        title={course.title}
+        description={course.description}
+        category={course.category}
+        duration_hours={course.duration_hours}
+        price_group={course.price_group}
+        price_individual={course.price_individual}
+        students={course.students}
+        rating={course.rating}
+        image={course.image}
+      />
+    </motion.div>
+  ))}
+</motion.div>
               ) : (
                 <div className="text-center py-12 rounded-xl border bg-card">
                   <p className="text-muted-foreground mb-4">No featured tutorials available.</p>
                   <Button asChild>
-                    <Link to="/tutorials">Browse All Tutorials</Link>
+                    <Link to="/courses">View All Courses</Link>
                   </Button>
                 </div>
-              )}
+              
             </>
           )}
 
@@ -489,46 +569,61 @@ const Home = () => {
           </div>
 
           {/* Stats Section */}
-          {!loading.tutorials && featuredTutorials.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-6"
-            >
-              <div className="p-6 rounded-xl border bg-card text-center">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
-                  <Users className="h-6 w-6 text-primary" />
-                </div>
-                <div className="text-3xl font-bold mb-2">
-                  {featuredTutorials.reduce((sum, t) => sum + t.students, 0).toLocaleString()}+
-                </div>
-                <p className="text-muted-foreground">Active Learners</p>
+          <motion.div
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+            className="mt-20"
+          >
+            {statsLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="p-6 rounded-xl border bg-card animate-pulse">
+                    <div className="h-12 w-12 rounded-lg bg-muted mb-4 mx-auto"></div>
+                    <div className="h-8 bg-muted rounded mb-2 w-1/2 mx-auto"></div>
+                    <div className="h-4 bg-muted rounded w-1/3 mx-auto"></div>
+                  </div>
+                ))}
               </div>
-              <div className="p-6 rounded-xl border bg-card text-center">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
-                  <Clock className="h-6 w-6 text-primary" />
+            ) : stats && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="p-6 rounded-xl border bg-card text-center">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
+                    <Users className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-3xl font-bold mb-2">
+                    {stats.total_students.toLocaleString()}+
+                  </div>
+                  <p className="text-muted-foreground">Active Students</p>
                 </div>
-                <div className="text-3xl font-bold mb-2">
-                  {featuredTutorials.reduce((sum, t) => {
-                    const hours = parseInt(t.duration.split(' ')[0]) || 0;
-                    return sum + hours;
-                  }, 0)}+
+                <div className="p-6 rounded-xl border bg-card text-center">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
+                    <BookOpen className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-3xl font-bold mb-2">
+                    {stats.total_courses}+
+                  </div>
+                  <p className="text-muted-foreground">Available Courses</p>
                 </div>
-                <p className="text-muted-foreground">Hours of Content</p>
+                <div className="p-6 rounded-xl border bg-card text-center">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
+                    <GraduationCap className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-3xl font-bold mb-2">
+                    {stats.total_tutorials}+
+                  </div>
+                  <p className="text-muted-foreground">Published Tutorials</p>
+                </div>
               </div>
-              <div className="p-6 rounded-xl border bg-card text-center">
-                <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 mx-auto">
-                  <Star className="h-6 w-6 text-primary" />
-                </div>
-                <div className="text-3xl font-bold mb-2">
-                  {(featuredTutorials.reduce((sum, t) => sum + t.rating, 0) / featuredTutorials.length).toFixed(1)}
-                </div>
-                <p className="text-muted-foreground">Average Rating</p>
+            )}
+            
+            {statsError && (
+              <div className="text-center mt-4 p-3 rounded-lg bg-yellow-50 border border-yellow-200">
+                <p className="text-yellow-700 text-sm">{statsError}</p>
               </div>
-            </motion.div>
-          )}
+            )}
+          </motion.div>
         </div>
       </section>
 
@@ -572,7 +667,7 @@ const Home = () => {
                 asChild
                 className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
               >
-                <Link to="/tutorials">
+                <Link to="/courses">
                   Browse Courses
                 </Link>
               </Button>

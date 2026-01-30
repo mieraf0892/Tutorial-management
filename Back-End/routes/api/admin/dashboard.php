@@ -15,4 +15,5 @@ Route::prefix('email-queue')->group(function () {
     Route::get('/token/{token}', [AdminController::class, 'searchEmailQueueByToken']);
     Route::delete('/clear', [AdminController::class, 'clearEmailQueue']);
     Route::post('/simulate', [AdminController::class, 'simulateEmail']);
+    
 });

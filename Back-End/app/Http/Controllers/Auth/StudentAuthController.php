@@ -36,7 +36,7 @@ class StudentAuthController extends Controller
         'captcha_token_exists' => !empty($captchaToken),
         'captcha_token_length' => strlen($captchaToken),
         'environment' => app()->environment(),
-        'secret_key_exists' => !empty(env('GOOGLE_RECAPTCHA_SECRET')),
+        'secret_key_exists' => !empty(env('RECAPTCHA_SECRET_KEY')),
         'user_ip' => $request->ip(),
     ]);
 
@@ -49,11 +49,11 @@ class StudentAuthController extends Controller
         return response()->json([
             'success' => false,
             'message' => 'CAPTCHA configuration error. Please contact administrator.',
-            'debug' => app()->environment('local', 'development') ? 'GOOGLE_RECAPTCHA_SECRET not set in .env' : null
+            'debug' => app()->environment('local', 'development') ? 'RECAPTCHA_SECRET_KEY not set in .env' : null
         ], 500);
     }
 
-    $captchaResponse = Http::asForm()->post('https://www.google.com/recaptcha/api/siteverify', [
+    $captchaResponse = Http::withoutVerifying()->asForm()->post('https://www.google.com/recaptcha/api/siteverify', [
         'secret' => $secretKey,
         'response' => $captchaToken,
         'remoteip' => $request->ip(),
@@ -92,8 +92,6 @@ class StudentAuthController extends Controller
         DB::beginTransaction();
 
         try {
-            // Generate email verification token
-            $emailVerificationToken = bin2hex(random_bytes(32));
             
             // Create User with pending status and verification token
             $user = User::create([
@@ -102,8 +100,7 @@ class StudentAuthController extends Controller
                 'password' => Hash::make($request->password),
                 'role' => 'student',
                 'phone' => $request->phone,
-                'status' => 'pending', // Set to pending until email verification
-                'email_verification_token' => $emailVerificationToken,
+                'status' => 'pending', 
                 'email_verified_at' => null,
             ]);
 
@@ -134,8 +131,18 @@ class StudentAuthController extends Controller
             // Create Course Details based on course type
             $this->saveCourseDetails($student->id, $request);
 
+            // Generate secure, temporary signed verification URL (expires in 72 hours)
+            $verificationUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                'verification.verify',              // the route name we added in web.php
+                now()->addHours(72),                // link valid for 3 days
+                [
+                    'id'   => $user->getKey(),      // user ID
+                    'hash' => sha1($user->getEmailForVerification()), // email hash for extra security
+                ]
+            );
+
             // Send email verification
-            $emailResult = $this->sendEmailVerification($user);
+            $emailResult = $this->sendEmailVerification($user, $verificationUrl);
 
             // Prepare response
             $response = [
@@ -178,93 +185,132 @@ class StudentAuthController extends Controller
         }
     }
 
-    /**
-     * Send email verification
-     */
-    private function sendEmailVerification(User $user): array
-    {
-        $verificationUrl = url('/api/verify-email/' . $user->email_verification_token);
-        
-        if (app()->environment('local', 'development', 'testing')) {
-            // Store in email queue for development
-            $email = EmailQueue::create([
-                'user_id' => $user->id,
-                'type' => 'verification',
-                'to' => $user->email,
-                'subject' => 'Verify Your Email Address - Tutorial Management System',
-                'content' => "Hello {$user->name},\n\nPlease click the link below to verify your email address:\n\n{$verificationUrl}\n\nThis link will expire in 24 hours.\n\nIf you did not create an account, no further action is required.\n\nBest regards,\nTutorial Management System Team",
-                'token' => $user->email_verification_token,
-                'verification_url' => $verificationUrl,
-                'sent_at' => now(),
-                'is_verification' => true,
-            ]);
-            
-            Log::info('Email verification stored in queue from StudentAuthController', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'verification_url' => $verificationUrl,
-                'email_queue_id' => $email->id
-            ]);
-            
-            return [
-                'sent' => false,
-                'development_mode' => true,
-                'verification_url' => $verificationUrl,
-                'email_queue_id' => $email->id,
-            ];
-        } else {
-            // Send real email in production
-            try {
-                Mail::to($user->email)->send(new EmailVerificationMail($user));
-                return ['sent' => true];
-            } catch (\Exception $e) {
-                Log::error('Failed to send verification email to ' . $user->email . ': ' . $e->getMessage());
-                return ['sent' => false, 'error' => $e->getMessage()];
-            }
-        }
+   /**
+ * Send email verification
+ */
+private function sendEmailVerification(User $user, string $verificationUrl): array
+{
+    // if (app()->environment('local', 'development', 'testing')) {
+    //     // Store in email queue for development (no real send)
+    //     $email = EmailQueue::create([
+    //         'user_id'        => $user->id,
+    //         'type'           => 'verification',
+    //         'to'             => $user->email,
+    //         'subject'        => 'Verify Your Email Address - Tutorial Management System',
+    //         'content'        => "Hello {$user->name},\n\n" .
+    //                            "Please click the link below to verify your email address:\n\n" .
+    //                            "{$verificationUrl}\n\n" .
+    //                            "This link will expire in 72 hours.\n\n" .
+    //                            "If you did not create an account, no further action is required.\n\n" .
+    //                            "Best regards,\nTutorial Management System Team",
+    //         'verification_url' => $verificationUrl,
+    //         'sent_at'        => now(),
+    //         'is_verification' => true,
+    //     ]);
+
+    //     Log::info('Email verification stored in queue from StudentAuthController', [
+    //         'user_id'         => $user->id,
+    //         'email'           => $user->email,
+    //         'verification_url' => $verificationUrl,
+    //         'email_queue_id'  => $email->id
+    //     ]);
+
+    //     return [
+    //         'sent'            => false,
+    //         'development_mode' => true,
+    //         'verification_url' => $verificationUrl,
+    //         'email_queue_id'  => $email->id,
+    //     ];
+    // }
+
+    // Production / real email sending (Mailtrap in dev if SMTP is configured)
+    try {
+        Mail::to($user->email)->send(new EmailVerificationMail($user, $verificationUrl));
+
+        Log::info('Verification email sent successfully to: ' . $user->email);
+
+        return ['sent' => true];
+    } catch (\Exception $e) {
+        Log::error('Failed to send verification email to ' . $user->email . ': ' . $e->getMessage());
+
+        return [
+            'sent'  => false,
+            'error' => $e->getMessage()
+        ];
     }
+}
 
     private function saveCourseDetails($studentId, $request)
-    {
-        $courseType = $request->courseType;
-        
-        switch ($courseType) {
-            case 'Programming':
+{
+    $courseType = $request->courseType;
+    
+    // Clean emoji helper function
+    $cleanEmoji = function($value) {
+        return trim(str_replace(['🧠', '💻', '📱', '🇪🇹', '🇬🇧', '🇨🇳', '🇸🇦', '🇫🇷'], '', $value));
+    };
+    
+    switch ($courseType) {
+        case 'Programming':
+            if (!empty($request->selectedArea) && is_array($request->selectedArea)) {
                 foreach ($request->selectedArea as $area) {
+                    $cleanArea = $cleanEmoji($area);
                     StudentCourseDetail::create([
                         'student_id' => $studentId,
-                        'field_type' => 'programming_area',
-                        'field_value' => $area
+                        'field_type' => 'programming_area', // Keep consistent
+                        'field_value' => $cleanArea // Save without emoji
+                    ]);
+                    
+                    // ALSO save as 'selected_area' for backward compatibility
+                    StudentCourseDetail::create([
+                        'student_id' => $studentId,
+                        'field_type' => 'selected_area', // Add this
+                        'field_value' => $cleanArea
                     ]);
                 }
-                break;
-                
-            case 'Language':
+            }
+            break;
+            
+        case 'Language':
+            if (!empty($request->selectedLanguages) && is_array($request->selectedLanguages)) {
                 foreach ($request->selectedLanguages as $language) {
+                    $cleanLanguage = $cleanEmoji($language);
+                    StudentCourseDetail::create([
+                        'student_id' => $studentId,
+                        'field_type' => 'language', // Changed from 'selected_language'
+                        'field_value' => $cleanLanguage
+                    ]);
+                    
+                    // ALSO save as 'selected_language' for backward compatibility
                     StudentCourseDetail::create([
                         'student_id' => $studentId,
                         'field_type' => 'selected_language',
-                        'field_value' => $language
+                        'field_value' => $cleanLanguage
                     ]);
                 }
-                break;
-                
-            case 'School Grades':
-                // Save grade
+            }
+            break;
+            
+        case 'School Grades':
+            // Save grade
+            if (!empty($request->selectedGrade)) {
                 StudentCourseDetail::create([
                     'student_id' => $studentId,
                     'field_type' => 'grade',
                     'field_value' => $request->selectedGrade
                 ]);
-                
-                // Save curriculum
+            }
+            
+            // Save curriculum
+            if (!empty($request->selectedCurriculum)) {
                 StudentCourseDetail::create([
                     'student_id' => $studentId,
                     'field_type' => 'curriculum',
                     'field_value' => $request->selectedCurriculum
                 ]);
-                
-                // Save subjects
+            }
+            
+            // Save subjects
+            if (!empty($request->selectedSubjects) && is_array($request->selectedSubjects)) {
                 foreach ($request->selectedSubjects as $subject) {
                     StudentCourseDetail::create([
                         'student_id' => $studentId,
@@ -272,15 +318,25 @@ class StudentAuthController extends Controller
                         'field_value' => $subject
                     ]);
                 }
-                break;
-                
-            case 'Entrance Preparation':
+            }
+            break;
+            
+        case 'Entrance Preparation':
+            if (!empty($request->selectedExam)) {
                 StudentCourseDetail::create([
                     'student_id' => $studentId,
                     'field_type' => 'exam',
                     'field_value' => $request->selectedExam
                 ]);
-                break;
-        }
+                
+                // ALSO save as 'selected_exam' for compatibility
+                StudentCourseDetail::create([
+                    'student_id' => $studentId,
+                    'field_type' => 'selected_exam',
+                    'field_value' => $request->selectedExam
+                ]);
+            }
+            break;
     }
+}
 }

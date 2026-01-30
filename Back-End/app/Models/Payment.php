@@ -9,98 +9,21 @@ class Payment extends Model
 {
     use HasFactory;
 
+    // 1. Tell Laravel which columns can be filled
     protected $fillable = [
         'user_id',
-        'tutorial_id',
-        'enrollment_id',
+        'transaction_reference',
         'amount',
         'currency',
-        'chapa_reference',
-        'transaction_id',
-        'payment_method',
         'status',
+        'checkout_url',
         'description',
-        'metadata',
-        'completed_at',
+        'payment_method'
     ];
 
-    protected $casts = [
-        'amount' => 'decimal:2',
-        'metadata' => 'array',
-        'completed_at' => 'datetime',
-        'is_sent' => 'boolean',
-    ];
-
-    protected $dates = [
-        'completed_at',
-    ];
-
-    // Relationships
+    // 2. Create a relationship to the User
     public function user()
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function tutorial()
-    {
-        return $this->belongsTo(Tutorial::class);
-    }
-
-    public function enrollment()
-    {
-        return $this->belongsTo(Enrollment::class);
-    }
-
-    // Scopes
-    public function scopePending($query)
-    {
-        return $query->where('status', 'pending');
-    }
-
-    public function scopeCompleted($query)
-    {
-        return $query->where('status', 'completed');
-    }
-
-    public function scopeFailed($query)
-    {
-        return $query->where('status', 'failed');
-    }
-
-    public function scopeForUser($query, $userId)
-    {
-        return $query->where('user_id', $userId);
-    }
-
-    // Helper methods
-    public function isCompleted()
-    {
-        return $this->status === 'completed';
-    }
-
-    public function isPending()
-    {
-        return $this->status === 'pending';
-    }
-
-    public function isFailed()
-    {
-        return $this->status === 'failed';
-    }
-
-    public function markAsCompleted($transactionId = null)
-    {
-        $this->update([
-            'status' => 'completed',
-            'transaction_id' => $transactionId,
-            'completed_at' => now(),
-        ]);
-    }
-
-    public function markAsFailed()
-    {
-        $this->update([
-            'status' => 'failed',
-        ]);
     }
 }

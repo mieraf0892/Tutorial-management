@@ -34,7 +34,7 @@ class User extends Authenticatable
 
     public function tutor()
     {
-        return $this->hasOne(Tutor::class);
+        return $this->hasOne(Tutor::class, 'user_id');
     }
 
     public function institutions()
@@ -271,4 +271,9 @@ public function approvedTutorials()
     }
     return null;
 }
-}
+
+// Inside the User class
+public function payments()
+{
+    return $this->hasMany(Payment::class);
+}}

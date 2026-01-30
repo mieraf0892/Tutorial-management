@@ -1,15 +1,8 @@
-// components/Tutor-Dashboard/CreateTutorialDialog.tsx
+// components/Tutor-Dashboard/CreateTutorialDialog.tsx - UPDATED VERSION
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -18,85 +11,196 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { X, Plus, Upload, Loader2 } from "lucide-react";
+import { 
+  X, 
+  Loader2, 
+  BookOpen, 
+  Target,
+  CheckSquare,
+  User,
+  Briefcase,
+  Plus,
+  Trash2
+} from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-interface Category {
+interface Course {
   id: number;
+  title: string;
+  description: string;
+  duration_hours: number;
+  price_group: number;
+  price_individual: number;
+  category_id: number;
+}
+
+interface TutorProfile {
   name: string;
-  slug: string;
+  email: string;
+  bio?: string;
+  experience?: string;
 }
 
 interface CreateTutorialDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTutorialCreated: () => void;
+  courseId: number; // REQUIRED: Must provide courseId
+  courseTitle?: string; // Optional: Pre-fetched course title
 }
 
 export default function CreateTutorialDialog({ 
   open, 
   onOpenChange, 
-  onTutorialCreated 
+  onTutorialCreated,
+  courseId,
+  courseTitle
 }: CreateTutorialDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [tutorProfile, setTutorProfile] = useState<TutorProfile | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   
+  // Content-focused form data
   const [formData, setFormData] = useState({
+    // Required fields
     title: "",
     description: "",
-    category_id: "",
-    level: "beginner",
-    price: "",
-    duration: "", // Changed back to duration to match database
-    image: "",
-    learning_objectives: [""], // Changed to match database column
-    requirements: [""],
-    instructor: "",
-    instructor_bio: "",
-    lessons: "",
-    includes: [""]
+    level: "intermediate" as "beginner" | "intermediate" | "advanced",
+    
+    // Content details
+    learning_objectives: [""], // Array of objectives
+    requirements: [""], // Array of requirements
+    includes: [""], // Array of what's included
+    
+    // Optional schedule info (admin may override)
+    batch_name: "",
+    schedule: "",
+    start_date: "",
   });
 
-  // Reset form when dialog opens/closes
+  // For managing arrays in form
+  const [newObjective, setNewObjective] = useState("");
+  const [newRequirement, setNewRequirement] = useState("");
+  const [newInclude, setNewInclude] = useState("");
+
   useEffect(() => {
-    if (open) {
-      fetchCategories();
+    if (open && courseId) {
+      fetchCourseAndTutorData();
     } else {
       // Reset form when closing
       setFormData({
         title: "",
         description: "",
-        category_id: "",
-        level: "beginner",
-        price: "",
-        duration: "",
-        image: "",
+        level: "intermediate",
         learning_objectives: [""],
         requirements: [""],
-        instructor: "",
-        instructor_bio: "",
-        lessons: "",
-        includes: [""]
+        includes: [""],
+        batch_name: "",
+        schedule: "",
+        start_date: "",
       });
+      setCourse(null);
+      setTutorProfile(null);
+      setNewObjective("");
+      setNewRequirement("");
+      setNewInclude("");
     }
-  }, [open]);
+  }, [open, courseId]);
 
-  const fetchCategories = async () => {
+  const fetchCourseAndTutorData = async () => {
     try {
-      const response = await apiClient.get("/categories");
-      if (response.data) {
-        setCategories(response.data.categories || response.data);
+      setIsLoadingData(true);
+      
+      // Fetch course details
+      const courseResponse = await apiClient.get(`/courses/${courseId}`);
+      if (courseResponse.data.success) {
+        const courseData = courseResponse.data.data;
+        setCourse(courseData);
+        
+        // Auto-generate title
+        setFormData(prev => ({
+          ...prev,
+          title: `${courseData.title} - My Version`,
+          description: `My personalized teaching approach for ${courseData.title}.`
+        }));
+      } else {
+        throw new Error("Failed to load course details");
       }
-    } catch (error) {
-      console.error("Failed to fetch categories:", error);
+      
+      // Fetch tutor profile
+      const tutorResponse = await apiClient.get("/tutor/profile");
+      if (tutorResponse.data.success) {
+        setTutorProfile(tutorResponse.data.data);
+      }
+      
+    } catch (error: any) {
+      console.error("Failed to fetch data:", error);
       toast({
         title: "Error",
-        description: "Failed to load categories",
+        description: "Failed to load course or profile data",
         variant: "destructive",
       });
+      onOpenChange(false);
+    } finally {
+      setIsLoadingData(false);
     }
+  };
+
+  // Helper functions for array fields
+  const addLearningObjective = () => {
+    if (newObjective.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        learning_objectives: [...prev.learning_objectives.filter(obj => obj.trim()), newObjective.trim()]
+      }));
+      setNewObjective("");
+    }
+  };
+
+  const removeLearningObjective = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      learning_objectives: prev.learning_objectives.filter((_, i) => i !== index)
+    }));
+  };
+
+  const addRequirement = () => {
+    if (newRequirement.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        requirements: [...prev.requirements.filter(req => req.trim()), newRequirement.trim()]
+      }));
+      setNewRequirement("");
+    }
+  };
+
+  const removeRequirement = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      requirements: prev.requirements.filter((_, i) => i !== index)
+    }));
+  };
+
+  const addInclude = () => {
+    if (newInclude.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        includes: [...prev.includes.filter(inc => inc.trim()), newInclude.trim()]
+      }));
+      setNewInclude("");
+    }
+  };
+
+  const removeInclude = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      includes: prev.includes.filter((_, i) => i !== index)
+    }));
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -106,63 +210,78 @@ export default function CreateTutorialDialog({
     }));
   };
 
-  const handleArrayInputChange = (field: 'learning_objectives' | 'requirements' | 'includes', index: number, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: prev[field].map((item, i) => i === index ? value : item)
-    }));
-  };
-
-  const addArrayItem = (field: 'learning_objectives' | 'requirements' | 'includes') => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: [...prev[field], ""]
-    }));
-  };
-
-  const removeArrayItem = (field: 'learning_objectives' | 'requirements' | 'includes', index: number) => {
-    if (formData[field].length > 1) {
-      setFormData(prev => ({
-        ...prev,
-        [field]: prev[field].filter((_, i) => i !== index)
-      }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, submitType: 'draft' | 'submit') => {
     e.preventDefault();
+    
+    if (!course) {
+      toast({
+        title: "Error",
+        description: "Course data not loaded",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate required fields
+    if (!formData.title.trim() || !formData.description.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Title and description are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Prepare data for submission - match database column names
-      const submissionData = {
-        title: formData.title,
-        description: formData.description,
-        category_id: parseInt(formData.category_id),
-        level: formData.level,
-        price: parseFloat(formData.price) || 0,
-        duration: parseInt(formData.duration) || 1, // Match database column name
-        image: formData.image || null,
-        learning_objectives: formData.learning_objectives.filter(item => item.trim() !== ""),
-        requirements: formData.requirements.filter(item => item.trim() !== ""),
-        instructor: formData.instructor || "Tutor", // Default value
-        instructor_bio: formData.instructor_bio || "",
-        lessons: parseInt(formData.lessons) || 0,
-        includes: formData.includes.filter(item => item.trim() !== ""),
-        is_published: false,
-        students: 0, // Default values
-        rating: 0,
-        content: "" // Empty default
-      };
+      // Filter out empty strings from arrays
+      const filteredObjectives = formData.learning_objectives.filter(obj => obj.trim());
+      const filteredRequirements = formData.requirements.filter(req => req.trim());
+      const filteredIncludes = formData.includes.filter(inc => inc.trim());
 
-      console.log("Submitting data:", submissionData);
+      // Prepare tutorial data - CONTENT PACKAGE FOCUSED
+      // In handleSubmit function - UPDATED DATA STRUCTURE
+const tutorialData = {
+  // Required
+  course_id: courseId,
+  title: formData.title,
+  description: formData.description,
+  level: formData.level,
+  
+  // Content arrays
+  learning_objectives: filteredObjectives.length > 0 
+    ? filteredObjectives 
+    : ["Students will master the course content"],
+  requirements: filteredRequirements.length > 0 
+    ? filteredRequirements 
+    : ["Basic knowledge of the subject"],
+  
+  // Tutor info
+  instructor_bio: tutorProfile?.bio || "",
+  
+  // Optional schedule info
+  batch_name: formData.batch_name.trim() || "Content Package",
+  schedule: formData.schedule.trim() || "Flexible schedule",
+  start_date: formData.start_date || null,
+  
+  // Status
+  status: submitType === 'submit' ? 'pending_approval' : 'draft',
+  
+  // REMOVED: category_id, includes, instructor_experience, price, duration
+  // These are inherited from course or don't exist in database
+};
 
-      const response = await apiClient.post("/tutor/tutorials", submissionData);
+      console.log("Creating tutorial content package:", tutorialData);
+
+      const response = await apiClient.post("/tutor/tutorials", tutorialData);
       
       if (response.data.success) {
         toast({
-          title: "Success!",
-          description: "Tutorial created successfully",
+          title: submitType === 'submit' ? "✅ Tutorial Submitted!" : "✅ Draft Saved!",
+          description: submitType === 'submit' 
+            ? "Tutorial submitted for admin approval. You'll be notified when approved."
+            : "Tutorial saved as draft. You can continue editing later.",
         });
         onTutorialCreated();
         onOpenChange(false);
@@ -171,7 +290,6 @@ export default function CreateTutorialDialog({
       }
     } catch (error: any) {
       console.error("Create tutorial error:", error);
-      console.error("Error response:", error.response?.data);
       
       const errorMessage = error.response?.data?.message || 
                           error.response?.data?.error || 
@@ -198,14 +316,30 @@ export default function CreateTutorialDialog({
       />
       
       {/* Modal Content */}
-      <div className="relative bg-background rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto border">
+      <div className="relative bg-background rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto border">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold tracking-tight">Create New Tutorial</h2>
+            <h2 className="text-2xl font-bold tracking-tight">
+              Create Tutorial Content Package
+            </h2>
             <p className="text-muted-foreground">
-              Build and publish your tutorial to start teaching
+              Create your teaching content for this course
             </p>
+            
+            {course && (
+              <div className="text-sm bg-blue-50 p-3 rounded border border-blue-200 mt-2">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4" />
+                  <span className="font-medium">Course: {course.title}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+                  <span>Duration: {course.duration_hours} hours</span>
+                  <span>Price: ${course.price_group} (group)</span>
+                  <span>Category ID: {course.category_id}</span>
+                </div>
+              </div>
+            )}
           </div>
           <Button
             variant="ghost"
@@ -218,307 +352,360 @@ export default function CreateTutorialDialog({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-8">
-          {/* Basic Information Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Basic Information</CardTitle>
-              <CardDescription>
-                Provide the essential details about your tutorial
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="title">Tutorial Title *</Label>
-                <Input
-                  id="title"
-                  type="text"
-                  placeholder="e.g., Advanced React Patterns"
-                  value={formData.title}
-                  onChange={(e) => handleInputChange('title', e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Description *</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe what students will learn in this tutorial..."
-                  rows={3}
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="category">Category *</Label>
-                  <Select
-                    value={formData.category_id}
-                    onValueChange={(value) => handleInputChange('category_id', value)}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map(category => (
-                        <SelectItem key={category.id} value={category.id.toString()}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="level">Difficulty Level *</Label>
-                  <Select
-                    value={formData.level}
-                    onValueChange={(value) => handleInputChange('level', value)}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select difficulty" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="beginner">Beginner</SelectItem>
-                      <SelectItem value="intermediate">Intermediate</SelectItem>
-                      <SelectItem value="advanced">Advanced</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="price">Price ($) *</Label>
-                  <Input
-                    id="price"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={formData.price}
-                    onChange={(e) => handleInputChange('price', e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="duration">Duration (hours) *</Label>
-                  <Input
-                    id="duration"
-                    type="number"
-                    min="1"
-                    placeholder="10"
-                    value={formData.duration}
-                    onChange={(e) => handleInputChange('duration', e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="lessons">Number of Lessons</Label>
-                  <Input
-                    id="lessons"
-                    type="number"
-                    min="0"
-                    placeholder="12"
-                    value={formData.lessons}
-                    onChange={(e) => handleInputChange('lessons', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="instructor">Instructor Name</Label>
-                  <Input
-                    id="instructor"
-                    type="text"
-                    placeholder="Your name"
-                    value={formData.instructor}
-                    onChange={(e) => handleInputChange('instructor', e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="image">Cover Image URL</Label>
-                  <Input
-                    id="image"
-                    type="url"
-                    placeholder="https://example.com/image.jpg"
-                    value={formData.image}
-                    onChange={(e) => handleInputChange('image', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="instructor_bio">Instructor Bio</Label>
-                <Textarea
-                  id="instructor_bio"
-                  placeholder="Tell students about your experience and background..."
-                  rows={2}
-                  value={formData.instructor_bio}
-                  onChange={(e) => handleInputChange('instructor_bio', e.target.value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Learning Objectives Card */}
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>Learning Objectives</CardTitle>
+        <form onSubmit={(e) => e.preventDefault()} className="p-6 space-y-6">
+          {isLoadingData ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mb-4" />
+              <p className="text-muted-foreground">Loading course details...</p>
+            </div>
+          ) : course ? (
+            <>
+              {/* Course Info Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BookOpen className="w-4 h-4" />
+                    Course Information
+                  </CardTitle>
                   <CardDescription>
-                    What students will learn from this tutorial
+                    You're creating content for this course
                   </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addArrayItem('learning_objectives')}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Objective
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {formData.learning_objectives.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center">
-                  <Input
-                    placeholder="e.g., Build real-world applications with React"
-                    value={item}
-                    onChange={(e) => handleArrayInputChange('learning_objectives', index, e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeArrayItem('learning_objectives', index)}
-                    disabled={formData.learning_objectives.length === 1}
-                    className="h-10 w-10 shrink-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground">Course Title</Label>
+                      <p className="font-medium">{course.title}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Duration</Label>
+                      <p className="font-medium">{course.duration_hours} hours</p>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Description</Label>
+                    <p className="text-muted-foreground line-clamp-3">{course.description}</p>
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Requirements Card */}
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
+              {/* Basic Tutorial Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Your Tutorial Information</CardTitle>
+                  <CardDescription>
+                    Define your version of this course
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Tutorial Title *</Label>
+                      <Input
+                        id="title"
+                        type="text"
+                        placeholder="e.g., Python for AI - Hands-on Practical Edition"
+                        value={formData.title}
+                        onChange={(e) => handleInputChange('title', e.target.value)}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Your unique title for this content package
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="level">Target Level *</Label>
+                      <Select
+                        value={formData.level}
+                        onValueChange={(value: "beginner" | "intermediate" | "advanced") => 
+                          handleInputChange('level', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="beginner">Beginner</SelectItem>
+                          <SelectItem value="intermediate">Intermediate</SelectItem>
+                          <SelectItem value="advanced">Advanced</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Description *</Label>
+                    <Textarea
+                      id="description"
+                      placeholder="Describe your teaching approach, focus areas, and methodology..."
+                      rows={3}
+                      value={formData.description}
+                      onChange={(e) => handleInputChange('description', e.target.value)}
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Explain how you'll teach this course differently
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Learning Objectives */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="w-4 h-4" />
+                    Learning Objectives
+                  </CardTitle>
+                  <CardDescription>
+                    What will students learn from your tutorial?
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    {formData.learning_objectives
+                      .filter(obj => obj.trim())
+                      .map((objective, index) => (
+                        <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                          <CheckSquare className="w-3 h-3 text-green-600" />
+                          <span className="flex-1 text-sm">{objective}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeLearningObjective(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="Add a learning objective..."
+                      value={newObjective}
+                      onChange={(e) => setNewObjective(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addLearningObjective())}
+                    />
+                    <Button type="button" onClick={addLearningObjective} variant="outline">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Requirements */}
+              <Card>
+                <CardHeader>
                   <CardTitle>Requirements</CardTitle>
                   <CardDescription>
-                    What students should know before taking this tutorial
+                    What do students need before starting?
                   </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addArrayItem('requirements')}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Requirement
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {formData.requirements.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center">
-                  <Input
-                    placeholder="e.g., Basic JavaScript knowledge"
-                    value={item}
-                    onChange={(e) => handleArrayInputChange('requirements', index, e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeArrayItem('requirements', index)}
-                    disabled={formData.requirements.length === 1}
-                    className="h-10 w-10 shrink-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    {formData.requirements
+                      .filter(req => req.trim())
+                      .map((requirement, index) => (
+                        <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                          <Badge variant="outline" className="text-xs">Req</Badge>
+                          <span className="flex-1 text-sm">{requirement}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeRequirement(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="Add a requirement..."
+                      value={newRequirement}
+                      onChange={(e) => setNewRequirement(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRequirement())}
+                    />
+                    <Button type="button" onClick={addRequirement} variant="outline">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Includes Card */}
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
+              {/* What's Included */}
+              <Card>
+                <CardHeader>
                   <CardTitle>What's Included</CardTitle>
                   <CardDescription>
-                    Additional resources and features included
+                    What materials/resources will you provide?
                   </CardDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => addArrayItem('includes')}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Item
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {formData.includes.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center">
-                  <Input
-                    placeholder="e.g., Downloadable resources, Certificate of completion"
-                    value={item}
-                    onChange={(e) => handleArrayInputChange('includes', index, e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeArrayItem('includes', index)}
-                    disabled={formData.includes.length === 1}
-                    className="h-10 w-10 shrink-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    {formData.includes
+                      .filter(inc => inc.trim())
+                      .map((include, index) => (
+                        <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                          <Badge variant="secondary" className="text-xs">Included</Badge>
+                          <span className="flex-1 text-sm">{include}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeInclude(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="Add what's included..."
+                      value={newInclude}
+                      onChange={(e) => setNewInclude(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addInclude())}
+                    />
+                    <Button type="button" onClick={addInclude} variant="outline">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Optional: Schedule Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Optional: Suggested Schedule</CardTitle>
+                  <CardDescription>
+                    You can suggest a schedule (admin may adjust)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="batch_name">Batch Name (Optional)</Label>
+                      <Input
+                        id="batch_name"
+                        type="text"
+                        placeholder="e.g., January 2026 Batch"
+                        value={formData.batch_name}
+                        onChange={(e) => handleInputChange('batch_name', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="start_date">Suggested Start Date</Label>
+                      <Input
+                        id="start_date"
+                        type="date"
+                        value={formData.start_date}
+                        onChange={(e) => handleInputChange('start_date', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="schedule">Suggested Schedule</Label>
+                    <Input
+                      id="schedule"
+                      type="text"
+                      placeholder="e.g., Monday & Wednesday 6-8 PM"
+                      value={formData.schedule}
+                      onChange={(e) => handleInputChange('schedule', e.target.value)}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Tutor Info Preview */}
+              {tutorProfile && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      Your Tutor Profile
+                    </CardTitle>
+                    <CardDescription>
+                      This information will be shown to students
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                        <User className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{tutorProfile.name}</p>
+                        <p className="text-muted-foreground">{tutorProfile.email}</p>
+                      </div>
+                    </div>
+                    {tutorProfile.bio && (
+                      <div>
+                        <Label className="text-muted-foreground">Bio</Label>
+                        <p className="mt-1">{tutorProfile.bio}</p>
+                      </div>
+                    )}
+                    {tutorProfile.experience && (
+                      <div>
+                        <Label className="text-muted-foreground flex items-center gap-2">
+                          <Briefcase className="w-3 h-3" />
+                          Experience
+                        </Label>
+                        <p className="mt-1">{tutorProfile.experience}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Course information not available</p>
+            </div>
+          )}
 
           {/* Submit Buttons */}
           <div className="flex gap-4 pt-6 border-t">
             <Button
-              type="submit"
-              disabled={loading}
+              type="button"
+              onClick={(e) => handleSubmit(e, 'draft')}
+              disabled={loading || isLoadingData || !course}
+              variant="outline"
               className="flex-1"
             >
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating Tutorial...
+                  Saving...
                 </>
               ) : (
+                "Save as Draft"
+              )}
+            </Button>
+            <Button
+              type="button"
+              onClick={(e) => handleSubmit(e, 'submit')}
+              disabled={loading || isLoadingData || !course}
+              className="flex-1"
+            >
+              {loading ? (
                 <>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Create Tutorial
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Submitting...
                 </>
+              ) : (
+                "Submit for Approval"
               )}
             </Button>
             <Button

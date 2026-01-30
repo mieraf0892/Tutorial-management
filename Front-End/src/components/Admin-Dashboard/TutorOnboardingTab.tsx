@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Check, X, Clock, User, GraduationCap, Briefcase, RefreshCw, Mail, Phone, MapPin, Eye, FileImage, AlertCircle } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { toast } from "sonner";
 
 interface TutorSubject {
   id: number;
@@ -93,7 +94,57 @@ export default function TutorOnboardingTab({
     approved: 0,
     rejected: 0
   });
-  const tutors = Array.isArray(pendingTutors) ? pendingTutors : []; 
+
+  // Extract tutors from the API response structure
+  const tutors = (() => {
+    if (!pendingTutors) {
+      console.warn("pendingTutors is null or undefined");
+      return [];
+    }
+
+    // If it's already an array (direct array passed)
+    if (Array.isArray(pendingTutors)) {
+      return pendingTutors;
+    }
+
+    // Handle the API response structure: { success: true, tutors: { data: [...] } }
+    if (pendingTutors.tutors && pendingTutors.tutors.data && Array.isArray(pendingTutors.tutors.data)) {
+      console.log("Extracting tutors from pendingTutors.tutors.data");
+      return pendingTutors.tutors.data;
+    }
+
+    // Handle alternative structure: { success: true, tutors: [...] }
+    if (pendingTutors.tutors && Array.isArray(pendingTutors.tutors)) {
+      console.log("Extracting tutors from pendingTutors.tutors");
+      return pendingTutors.tutors;
+    }
+
+    // Handle paginated response without success wrapper
+    if (pendingTutors.data && Array.isArray(pendingTutors.data)) {
+      console.log("Extracting tutors from pendingTutors.data");
+      return pendingTutors.data;
+    }
+
+    console.warn("Could not extract tutors array from:", pendingTutors);
+    return [];
+  })();
+
+  // Debug logging
+  useEffect(() => {
+    console.log("=== TUTOR ONBOARDING DEBUG ===");
+    console.log("pendingTutors prop structure:", {
+      isArray: Array.isArray(pendingTutors),
+      keys: pendingTutors ? Object.keys(pendingTutors) : 'null',
+      hasTutors: pendingTutors?.tutors ? 'YES' : 'NO',
+      tutorsIsArray: Array.isArray(pendingTutors?.tutors),
+      hasTutorsData: pendingTutors?.tutors?.data ? 'YES' : 'NO',
+      tutorsDataIsArray: Array.isArray(pendingTutors?.tutors?.data),
+    });
+    
+    console.log("Processed tutors array:", tutors);
+    console.log("Number of tutors:", tutors.length);
+    console.log("First tutor:", tutors[0]);
+  }, [pendingTutors, tutors]);
 
   // Calculate degree verification stats
   useEffect(() => {
@@ -144,7 +195,7 @@ export default function TutorOnboardingTab({
 
   const handleViewDegreePhoto = async (tutor: PendingTutor) => {
     if (!tutor.tutor?.degree_photo_url && !tutor.tutor?.degree_photo) {
-      alert("No degree photo uploaded for this tutor");
+      toast.error("No degree photo uploaded for this tutor");
       return;
     }
 
@@ -160,7 +211,7 @@ export default function TutorOnboardingTab({
       
     } catch (error) {
       console.error('Error loading degree photo:', error);
-      alert("Failed to load degree photo. Please try again.");
+      toast.error("Failed to load degree photo. Please try again.");
     } finally {
       setLoadingDegreePhoto(false);
     }
@@ -168,38 +219,38 @@ export default function TutorOnboardingTab({
 
   const handleApproveDegree = async (tutorId: number) => {
     try {
-      const response = await apiClient.post(`/admin/tutor-approvals/${tutorId}/approve-degree`);
+      const response = await apiClient.post(`/tutor-approvals/${tutorId}/approve-degree`);
       
       if (response.data.success) {
-        alert("Degree approved successfully!");
+        toast.success("Degree approved successfully!");
         if (onRefresh) onRefresh();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error approving degree:', error);
-      alert("Failed to approve degree. Please try again.");
+      toast.error(error.response?.data?.message || "Failed to approve degree. Please try again.");
     }
   };
 
   const handleRejectDegree = async (tutorId: number, reason: string) => {
     if (!reason.trim()) {
-      alert("Please provide a rejection reason");
+      toast.error("Please provide a rejection reason");
       return;
     }
 
     try {
-      const response = await apiClient.post(`/admin/tutor-approvals/${tutorId}/reject-degree`, {
+      const response = await apiClient.post(`/tutor-approvals/${tutorId}/reject-degree`, {
         rejection_reason: reason
       });
       
       if (response.data.success) {
-        alert("Degree rejected successfully!");
+        toast.success("Degree rejected successfully!");
         setRejectDialogOpen(false);
         setRejectionReason("");
         if (onRefresh) onRefresh();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error rejecting degree:', error);
-      alert("Failed to reject degree. Please try again.");
+      toast.error(error.response?.data?.message || "Failed to reject degree. Please try again.");
     }
   };
 
@@ -232,6 +283,12 @@ export default function TutorOnboardingTab({
   const filteredTutors = activeTab === "pending" 
     ? tutors.filter(t => !t.tutor?.degree_verified || t.tutor?.degree_verified === 'pending')
     : tutors;
+
+  // Debug filtered tutors
+  useEffect(() => {
+    console.log("Filtered tutors count:", filteredTutors.length);
+    console.log("Active tab:", activeTab);
+  }, [filteredTutors, activeTab]);
 
   if (tutors.length === 0) {
     return (
@@ -277,6 +334,32 @@ export default function TutorOnboardingTab({
 
   return (
     <div className="space-y-6">
+      {/* Debug info - remove this in production */}
+      <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">Debug Info</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div>
+            <span className="text-muted-foreground">Raw data type: </span>
+            <span className="font-medium">{typeof pendingTutors}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Tutors extracted: </span>
+            <span className="font-medium">{tutors.length}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Filtered: </span>
+            <span className="font-medium">{filteredTutors.length}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Active tab: </span>
+            <span className="font-medium">{activeTab}</span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-foreground">Tutor Onboarding</h2>

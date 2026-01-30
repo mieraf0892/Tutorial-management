@@ -8,30 +8,29 @@ Route::prefix('tutor')->group(function () {
     Route::get('/dashboard', [TutorController::class, 'dashboard']);
     
     // ==============================
-    // Assignment Management
+    // Course Assignment Management
     // ==============================
     
-    // Get assignments for current tutor
+    // Get ALL assignments (individual + classes) grouped by status
     Route::get('/assignments', [TutorController::class, 'getAssignments']);
     
-    // Get pending assignments
-    Route::get('/assignments/pending', [TutorController::class, 'getPendingAssignments']);
+    // Accept an assignment or class (with type parameter)
+    Route::post('/assignments/{id}/accept', [TutorController::class, 'acceptAssignment'])
+        ->where('id', '[0-9]+');
     
-    // Accept an assignment
-    Route::post('/assignments/{assignment}/accept', [TutorController::class, 'acceptAssignment']);
+    // Reject an assignment or class (with type parameter and reason)
+    Route::post('/assignments/{id}/reject', [TutorController::class, 'rejectAssignment'])
+        ->where('id', '[0-9]+');
     
-    // Reject an assignment
-    Route::post('/assignments/{assignment}/reject', [TutorController::class, 'rejectAssignment']);
-    
-    // Get assigned tutorials (accepted assignments)
-    Route::get('/assigned-tutorials', [TutorController::class, 'getAssignedTutorials']);
-    
-    // Get tutorial creation statistics
-    Route::get('/tutorial-stats', [TutorController::class, 'getTutorialStats']);
+    // 🆕 NEW: Get tutor's accepted courses for tutorial creation
+    Route::get('/accepted-courses', [TutorController::class, 'getCourses']);
     
     // ==============================
     // Tutorial Workflow
     // ==============================
+    
+    // 🆕 NEW: Create tutorial (with optional course_id)
+    Route::post('/tutorials', [TutorController::class, 'createTutorial']);
     
     Route::post('/tutorials/{tutorial}/submit-for-review', [TutorController::class, 'submitForReview']);
     Route::post('/tutorials/{tutorial}/mark-as-completed', [TutorController::class, 'markAsCompleted']);

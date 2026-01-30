@@ -1,3 +1,4 @@
+// src/App.tsx
 import { useEffect } from 'react';
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -7,8 +8,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { DarkModeProvider } from '@/contexts/DarkModeProvider';
 
 import Home from "./pages/Home";
-import Tutorials from "./pages/Tutorials";
-import TutorialDetail from "./pages/TutorialDetail";
 import Categories from "./pages/Categories";
 import About from "./pages/About";
 import Tutor from "./pages/TutorDashboard";
@@ -23,6 +22,9 @@ import TutorProfilePage from "./pages/TutorProfilePage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import StudentProfile from "./pages/StudentProfilePage";
 import RegistrationPending from './pages/RegistrationPending';
+import CourseDetail from './pages/CourseDetail';
+import Courses from './pages/Courses';
+import TutorialDetail from './pages/TutorialDetail';
 
 const AppContent = () => {
   const { initializeAuth, isLoading } = useAuth();
@@ -47,19 +49,43 @@ const AppContent = () => {
       <BrowserRouter>
         <div className="min-h-screen bg-background text-foreground">
           <Routes>
-            {/* Public routes */}
+            {/* Public Routes */}
             <Route path="/" element={<Home />} />
-            <Route path="/tutorial/:id" element={<TutorialDetail />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/about" element={<About />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/payment/callback" element={<PaymentCallback />} />
-            <Route path="/tutor/profile" element={<TutorProfilePage />} />
-            <Route path="/student/profile" element={<StudentProfile />} />
             <Route path="/registration-pending" element={<RegistrationPending />} />
-            
-            {/* Student dashboard with learning routes */}
+
+            {/* Public Course Catalog & Detail */}
+            <Route path="/courses" element={<Courses />} />
+            <Route path="/courses/:id" element={<CourseDetail />} />
+            <Route path="/tutorials/:id" element={<TutorialDetail />} />
+
+            {/* Legacy / Tutorials (optional redirect or alias) */}
+            <Route 
+              path="/tutorials" 
+              element={<Courses />}  // or <Navigate to="/courses" replace />
+            />
+
+            {/* Protected Tutor Profile */}
+            <Route path="/tutor/profile" element={<TutorProfilePage />} />
+
+            {/* Protected Student Profile */}
+            <Route path="/student/profile" element={<StudentProfile />} />
+
+            {/* Protected Student Dashboard & Learning Routes */}
+            <Route 
+              path="/student" 
+              element={
+                <ProtectedRoute requiredRole="student">
+                  <Student />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Student Specific Lesson View */}
             <Route 
               path="/student/learn/:courseId/lesson/:lessonId" 
               element={
@@ -68,48 +94,18 @@ const AppContent = () => {
                 </ProtectedRoute>
               } 
             />
-            
-            {/* Student Dashboard with Learning Mode */}
-  <Route 
-    path="/student" 
-    element={
-      <ProtectedRoute requiredRole="student">
-        <Student />
-      </ProtectedRoute>
-    } 
-  />
-  
-  {/* Student Learning Route - This handles lesson URLs */}
-  <Route 
-    path="/student/learn/:courseId/lesson/:lessonId" 
-    element={
-      <ProtectedRoute requiredRole="student">
-        <Student />
-      </ProtectedRoute>
-    } 
-  />
-            
-            
-            
-            {/* Protected Routes */}
+
+            {/* Protected Tutor Dashboard */}
             <Route 
-              path="/tutorials" 
+              path="/tutor" 
               element={
-                <ProtectedRoute requiredRole="student">
-                  <Tutorials />
+                <ProtectedRoute requiredRole="tutor">
+                  <Tutor />
                 </ProtectedRoute>
               } 
             />
-            
-            {/* Protected Dashboard Routes */}
-            <Route 
-              path="/super-admin" 
-              element={
-                <ProtectedRoute requiredRole="super_admin">
-                  <SuperAdmin />
-                </ProtectedRoute>
-              } 
-            />
+
+            {/* Protected Admin Dashboard */}
             <Route 
               path="/admin" 
               element={
@@ -118,6 +114,18 @@ const AppContent = () => {
                 </ProtectedRoute>
               } 
             />
+
+            {/* Protected Super Admin Dashboard */}
+            <Route 
+              path="/super-admin" 
+              element={
+                <ProtectedRoute requiredRole="super_admin">
+                  <SuperAdmin />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Protected Staff Dashboard (placeholder) */}
             <Route 
               path="/staff" 
               element={
@@ -131,16 +139,8 @@ const AppContent = () => {
                 </ProtectedRoute>
               } 
             />
-            <Route 
-              path="/tutor" 
-              element={
-                <ProtectedRoute requiredRole="tutor">
-                  <Tutor />
-                </ProtectedRoute>
-              } 
-            />
-            
-            {/* Catch-all route for 404 */}
+
+            {/* Catch-all 404 */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </div>

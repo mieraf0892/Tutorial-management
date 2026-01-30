@@ -19,7 +19,8 @@ import {
   MessageCircle,
   Upload,
   CheckCircle,
-  LayoutDashboard
+  LayoutDashboard,
+  FileText
 } from "lucide-react";
 
 // Components
@@ -38,12 +39,14 @@ import TutorOverview from "@/components/Tutor-Dashboard/TutorOverview"; // New c
 
 import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import AcceptedCoursesTab from "@/components/Tutor-Dashboard/AcceptedCoursesTab";
 
 // Sidebar items - Added Overview as first item
 const tutorNavigationItems = [
   { title: "Overview", value: "overview", icon: LayoutDashboard },
   { title: "My Assignments", value: "assignments", icon: ClipboardList },
-  { title: "My Tutorials", value: "tutorials", icon: BookOpen },
+  { title: "My Courses", value: "courses", icon: BookOpen }, // NEW
+  { title: "My Tutorials", value: "tutorials", icon: FileText },
   { title: "Sessions", value: "sessions", icon: Clock },
   { title: "Attendance", value: "attendance", icon: CheckCircle },
   { title: "Students", value: "students", icon: Users },
@@ -83,6 +86,11 @@ export default function TutorDashboard() {
       console.error('Failed to fetch unread count:', error);
     }
   };
+
+  const [courseForTutorial, setCourseForTutorial] = useState<{
+    id: number;
+    title: string;
+  } | null>(null);
 
   // Poll for unread messages every 30 seconds
   useEffect(() => {
@@ -135,7 +143,10 @@ export default function TutorDashboard() {
   }, []);
 
   const handleLogout = () => logout();
-  const handleTutorialCreated = () => fetchDashboardData();
+  const handleTutorialCreated = () => {
+    fetchDashboardData();
+    setCourseForTutorial(null); // Reset
+  };
 
   const handleStartSession = (session: any) => {
     if (session.meeting_link) window.open(session.meeting_link, "_blank");
@@ -266,11 +277,6 @@ export default function TutorDashboard() {
                 <User className="w-4 h-4 mr-2" /> 
                 <span className="hidden sm:inline">Profile</span>
               </Button>
-              <Button onClick={() => setShowCreateDialog(true)} className="flex-1 sm:flex-none">
-                <Plus className="w-4 h-4 mr-2" /> 
-                <span className="hidden sm:inline">Create Tutorial</span>
-                <span className="sm:hidden">Create</span>
-              </Button>
             </div>
           </div>
 
@@ -319,9 +325,17 @@ export default function TutorDashboard() {
               {activeTab === "tutorials" && (
                 <TutorialsTab
                   tutorials={dashboardData?.tutorials || []}
-                  onCreateTutorial={() => setShowCreateDialog(true)}
                   onTutorialUpdate={fetchDashboardData}
                 />
+              )}
+
+              {activeTab === "courses" && (
+                <AcceptedCoursesTab
+                  onCreateTutorial={(courseId, courseTitle) => {
+                    setCourseForTutorial({ id: courseId, title: courseTitle });
+                    setShowCreateDialog(true);
+                  }}
+                />  
               )}
 
               {activeTab === "sessions" && (
@@ -378,8 +392,15 @@ export default function TutorDashboard() {
         {/* Create Tutorial Dialog */}
         <CreateTutorialDialog
           open={showCreateDialog}
-          onOpenChange={setShowCreateDialog}
+          onOpenChange={(open) => {
+            setShowCreateDialog(open);
+              if (!open) {
+                setCourseForTutorial(null); // Reset when dialog closes
+              }
+            }}
           onTutorialCreated={handleTutorialCreated}
+          courseId={courseForTutorial?.id}
+          courseTitle={courseForTutorial?.title}
         />
       </div>
     </SidebarProvider>

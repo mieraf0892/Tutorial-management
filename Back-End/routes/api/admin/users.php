@@ -25,4 +25,16 @@ Route::prefix('admin')->group(function () {
     // Session Reports
     Route::get('/pending-reports', [AdminController::class, 'pendingReports']);
     Route::post('/reports/{report}/approve', [AdminController::class, 'approveReport']);
+    Route::get('/tutors', function () {
+    $tutors = \App\Models\User::where('role', 'tutor')
+        ->where('status', 'active')  // or 'verified' — adjust if needed
+        ->select('id', 'name', 'email')
+        ->get();
+
+    return response()->json([
+        'success' => true,
+        'tutors' => $tutors
+    ]);
 });
+});
+

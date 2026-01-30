@@ -3,400 +3,248 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\EnrollmentService;
-use App\Services\PaymentService;
-use App\Services\ChapaService;
-use App\Models\Tutorial;
-use App\Models\Payment;
-use App\Models\Enrollment;
+use App\Models\Course;
+use App\Models\Student;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\JsonResponse;
 
 class PaymentController extends Controller
 {
-    protected $enrollmentService;
-    protected $paymentService;
-    protected $chapaService;
-
-    public function __construct(
-        EnrollmentService $enrollmentService,
-        PaymentService $paymentService,
-        ChapaService $chapaService
-    ) {
-        $this->enrollmentService = $enrollmentService;
-        $this->paymentService = $paymentService;
-        $this->chapaService = $chapaService;
-    }
-
     /**
-     * Initialize payment for tutorial enrollment
+     * Calculate price with selected course
      */
-    public function initialize(Request $request, Tutorial $tutorial)
+    public function getPaymentStatus(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'payment_method' => 'sometimes|in:chapa',
-            'return_url' => 'sometimes|url',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $user = Auth::user();
-        
-        // Check if user is a student
-        if ($user->role !== 'student') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Only students can enroll in tutorials'
-            ], 403);
-        }
-
-        // Check if tutorial is free
-        if ($tutorial->is_free) {
-            // Direct enrollment for free tutorials
-            $enrollment = $this->enrollmentService->createPending($user->id, $tutorial->id);
-            $this->enrollmentService->activate($enrollment->id);
+        try {
+            $user = Auth::user();
             
-            return response()->json([
-                'success' => true,
-                'message' => 'Successfully enrolled in free tutorial',
-                'data' => [
-                    'enrollment_id' => $enrollment->id,
-                    'tutorial_id' => $tutorial->id,
-                    'is_free' => true,
-                ]
-            ]);
-        }
+            // Load student with relations
+            $student = $user->student()->with(['learningPreferences', 'courseDetails'])->first();
 
-        // Check if already enrolled
-        $existingEnrollment = Enrollment::where('user_id', $user->id)
-            ->where('tutorial_id', $tutorial->id)
-            ->whereIn('status', ['active', 'pending'])
-            ->first();
-
-        if ($existingEnrollment) {
-            // Check if there's an active payment
-            $existingPayment = Payment::where('enrollment_id', $existingEnrollment->id)
-                ->whereIn('status', ['pending', 'completed'])
-                ->first();
-
-            if ($existingPayment && $existingPayment->isCompleted()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'You are already enrolled in this tutorial'
-                ], 400);
+            if (!$student) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
             }
 
-            if ($existingPayment && $existingPayment->isPending()) {
-                // Check if we need to regenerate payment link
+            $prefs = $student->learningPreferences;
+            $details = $student->courseDetails;
+
+            // 1. Check if student has selected a course
+            if (!$student->selected_course_id) {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'You have a pending payment for this tutorial',
-                    'data' => [
-                        'enrollment_id' => $existingEnrollment->id,
-                        'payment_reference' => $existingPayment->chapa_reference,
-                    ]
-                ], 400);
-            }
-        }
-
-        // Create pending enrollment
-        $enrollment = $this->enrollmentService->createPending($user->id, $tutorial->id);
-
-        // Create pending payment
-        try {
-            $payment = $this->paymentService->createPending(
-                $user->id,
-                $tutorial->id,
-                $enrollment->id,
-                $tutorial->price
-            );
-        } catch (\Exception $e) {
-            Log::error('Failed to create payment record', [
-                'error' => $e->getMessage(),
-                'user_id' => $user->id,
-                'tutorial_id' => $tutorial->id,
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to create payment record'
-            ], 500);
-        }
-
-        // Prepare Chapa payload
-        $chapaData = [
-            'amount' => $tutorial->price,
-            'currency' => 'ETB',
-            'email' => $user->email,
-            'first_name' => $this->getFirstName($user->name),
-            'last_name' => $this->getLastName($user->name),
-            'tx_ref' => $payment->chapa_reference,
-            'callback_url' => route('payment.webhook'),
-            'return_url' => $request->return_url ?? config('app.frontend_url') . '/payment/callback',
-            'title' => "Enrollment: {$tutorial->title}",
-            'description' => "Payment for {$tutorial->title} tutorial",
-            'user_id' => $user->id,
-            'tutorial_id' => $tutorial->id,
-            'enrollment_id' => $enrollment->id,
-        ];
-
-        try {
-            // Initialize Chapa payment
-            $chapaResponse = $this->chapaService->initializePayment($chapaData);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Payment initialized successfully',
-                'data' => [
-                    'checkout_url' => $chapaResponse['data']['checkout_url'],
-                    'payment_reference' => $payment->chapa_reference,
-                    'enrollment_id' => $enrollment->id,
-                    'tutorial_id' => $tutorial->id,
-                    'amount' => $tutorial->price,
+                    'success' => true,
+                    'is_paid' => (bool)$student->is_paid,
+                    'amount_due' => 0, // No course selected yet
+                    'requires_course_selection' => true,
                     'currency' => 'ETB',
-                ]
-            ]);
+                    'message' => 'Please select a course to calculate price'
+                ]);
+            }
 
-        } catch (\Exception $e) {
-            Log::error('Chapa payment initialization failed', [
-                'error' => $e->getMessage(),
-                'user_id' => $user->id,
-                'tutorial_id' => $tutorial->id,
-                'chapa_data' => $chapaData,
-            ]);
+            // 2. Get the selected course with prices
+            $course = Course::find($student->selected_course_id);
+            if (!$course) {
+                return response()->json(['success' => false, 'message' => 'Selected course not found'], 404);
+            }
 
-            // Mark payment as failed
-            $this->paymentService->markFailed($payment->chapa_reference);
+            // 3. Get the correct hourly rate based on preference
+            $hourlyRate = 0;
+            $rateType = 'Group'; // default
             
-            // Cancel enrollment if payment fails
-            $this->enrollmentService->cancel($enrollment->id);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to initialize payment. Please try again.',
-                'error' => config('app.debug') ? $e->getMessage() : 'Payment service unavailable'
-            ], 500);
-        }
-    }
-
-    /**
-     * Handle Chapa webhook callback
-     */
-    public function webhookCallback(Request $request)
-    {
-        Log::info('Chapa Webhook Received', [
-            'headers' => $request->headers->all(),
-            'payload' => $request->all(),
-        ]);
-
-        // Get raw payload for signature verification
-        $payload = $request->getContent();
-        $signature = $request->header('Chapa-Signature');
-
-        if (!$signature) {
-            Log::warning('Missing Chapa-Signature header');
-            return response()->json(['message' => 'Missing signature'], 400);
-        }
-
-        // Verify webhook signature
-        if (!$this->paymentService->verifyChapaSignature(json_decode($payload, true), $signature)) {
-            Log::warning('Invalid webhook signature', [
-                'signature' => $signature,
-                'payload' => $payload,
-            ]);
-            return response()->json(['message' => 'Invalid signature'], 400);
-        }
-
-        $event = $request->input('event');
-        $data = $request->input('data');
-
-        Log::info('Chapa Webhook Event', [
-            'event' => $event,
-            'tx_ref' => $data['tx_ref'] ?? null,
-        ]);
-
-        if ($event === 'charge.success') {
-            try {
-                // Payment successful
-                $payment = $this->paymentService->markCompleted(
-                    $data['tx_ref'],
-                    $data['id'] ?? null
-                );
-
-                Log::info('Payment completed successfully', [
-                    'reference' => $data['tx_ref'],
-                    'transaction_id' => $data['id'] ?? null,
-                    'payment_id' => $payment->id,
-                    'enrollment_id' => $payment->enrollment_id,
-                ]);
-
-                // You can trigger events here, like sending emails
-                // event(new PaymentCompleted($payment));
-
-            } catch (\Exception $e) {
-                Log::error('Failed to process successful payment', [
-                    'error' => $e->getMessage(),
-                    'tx_ref' => $data['tx_ref'],
-                ]);
-            }
-
-        } elseif ($event === 'charge.failure') {
-            try {
-                // Payment failed
-                $payment = $this->paymentService->markFailed($data['tx_ref']);
-
-                Log::warning('Payment failed', [
-                    'reference' => $data['tx_ref'],
-                    'reason' => $data['failure_message'] ?? 'Unknown',
-                    'payment_id' => $payment->id,
-                ]);
-
-            } catch (\Exception $e) {
-                Log::error('Failed to process failed payment', [
-                    'error' => $e->getMessage(),
-                    'tx_ref' => $data['tx_ref'],
-                ]);
-            }
-        }
-
-        return response()->json(['message' => 'Webhook processed']);
-    }
-
-    /**
-     * Verify payment status
-     */
-    public function verify(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'payment_reference' => 'required|string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $user = Auth::user();
-        $paymentReference = $request->payment_reference;
-
-        $payment = Payment::where('chapa_reference', $paymentReference)
-            ->where('user_id', $user->id)
-            ->with(['tutorial', 'enrollment'])
-            ->first();
-
-        if (!$payment) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Payment not found'
-            ], 404);
-        }
-
-        // If payment is pending, verify with Chapa
-        if ($payment->isPending()) {
-            try {
-                $chapaVerification = $this->chapaService->verifyTransaction($paymentReference);
-                
-                if ($chapaVerification['status'] === 'success') {
-                    $payment = $this->paymentService->markCompleted(
-                        $paymentReference,
-                        $chapaVerification['data']['id'] ?? null
-                    );
+            if ($prefs) {
+                $rateType = $prefs->learning_preference;
+                if ($rateType === 'Individual') {
+                    $hourlyRate = $course->price_individual ?? 0;
+                } else {
+                    $hourlyRate = $course->price_group ?? 0;
                 }
-            } catch (\Exception $e) {
-                Log::warning('Chapa verification failed', [
-                    'error' => $e->getMessage(),
-                    'payment_reference' => $paymentReference,
-                ]);
+            } else {
+                $hourlyRate = $course->price_group ?? 0;
             }
-        }
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'payment' => $payment,
-                'tutorial' => $payment->tutorial,
-                'enrollment' => $payment->enrollment,
-            ]
-        ]);
-    }
+            if ($hourlyRate <= 0) {
+                return response()->json(['success' => false, 'message' => 'Course price not set'], 400);
+            }
 
-    /**
-     * Get payment details
-     */
-    public function show(Payment $payment)
-    {
-        $user = Auth::user();
+            // 4. SPECIAL PREMIUMS (Curriculum & Exams)
+            $premiumMarkup = 1.0; 
+            $examFees = 0;
+            
+            foreach ($details as $detail) {
+                if ($detail->field_type === 'selectedCurriculum' && $detail->field_value === 'international') {
+                    $premiumMarkup = 1.2; // 20% increase
+                }
+                if ($detail->field_type === 'selectedExam' && in_array($detail->field_value, ['SAT', 'IELTS', 'TOEFL'])) {
+                    $examFees += 50; // Exam fee per exam
+                }
+            }
 
-        // Check if user owns this payment
-        if ($payment->user_id !== $user->id && $user->role !== 'admin') {
+            // 5. PREFERENCE & MODE
+            $modeExtra = 0;
+            $hours = 1;
+            $daysCount = 1;
+
+            if ($prefs) {
+                $modeExtra = ($prefs->learning_mode === 'Home to Home') ? 150 : 0;
+                $hours = (int)($prefs->hours_per_day ?: 1);
+                $daysCount = (int)($prefs->study_days ?: 1);
+            }
+
+            // 6. THE CORRECT FORMULA
+            $rateWithMode = $hourlyRate + $modeExtra;
+            $weeklyHours = $hours * $daysCount;
+            $monthlyHours = $weeklyHours * 4; // 4 weeks per month
+            
+            // Base monthly fee
+            $monthlyFee = $rateWithMode * $monthlyHours;
+            
+            // Apply premium markup
+            $totalAmount = $monthlyFee * $premiumMarkup;
+            
+            // Add exam fees
+            $totalAmount += $examFees;
+
+            // 7. SAVE TOTAL TO DATABASE
+            $student->final_price = round($totalAmount, 2);
+            $student->save();
+
             return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
-        $payment->load(['tutorial', 'enrollment']);
-
-        return response()->json([
-            'success' => true,
-            'data' => $payment
-        ]);
-    }
-
-    /**
-     * Get user's payment history
-     */
-    public function history(Request $request)
-    {
-        $user = Auth::user();
-        
-        $perPage = $request->get('per_page', 10);
-        
-        $payments = Payment::where('user_id', $user->id)
-            ->with(['tutorial', 'enrollment'])
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage);
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'payments' => $payments->items(),
-                'pagination' => [
-                    'current_page' => $payments->currentPage(),
-                    'per_page' => $payments->perPage(),
-                    'total' => $payments->total(),
-                    'last_page' => $payments->lastPage(),
+                'success' => true,
+                'is_paid' => (bool)$student->is_paid,
+                'amount_due' => $student->final_price,
+                'currency' => 'ETB',
+                'selected_course' => [
+                    'id' => $course->id,
+                    'title' => $course->title,
+                    'category' => $course->category,
+                    'subcategory' => $course->subcategory,
+                    'hourly_rate' => $hourlyRate,
+                    'rate_type' => $rateType
+                ],
+                'summary' => [
+                    'course' => $student->course_type,
+                    'learning_preference' => $prefs->learning_preference ?? 'Group',
+                    'learning_mode' => $prefs->learning_mode ?? 'Online',
+                    'days_per_week' => $daysCount,
+                    'hours_per_day' => $hours,
+                    'weekly_hours' => $weeklyHours,
+                    'monthly_hours' => $monthlyHours,
+                    'premium_markup' => $premiumMarkup,
+                    'mode_extra' => $modeExtra,
+                    'exam_fees' => $examFees
+                ],
+                'calculation_breakdown' => [
+                    'hourly_rate' => $hourlyRate,
+                    'mode_extra' => $modeExtra,
+                    'rate_with_mode' => $rateWithMode,
+                    'weekly_hours' => $weeklyHours,
+                    'monthly_hours' => $monthlyHours,
+                    'monthly_fee' => $monthlyFee,
+                    'after_premium' => $monthlyFee * $premiumMarkup,
+                    'after_exam_fees' => $totalAmount
                 ]
-            ]
-        ]);
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 
     /**
-     * Helper method to get first name
+     * API to update selected course
      */
-    private function getFirstName(string $fullName): string
+    public function updateSelectedCourse(Request $request): JsonResponse
     {
-        $names = explode(' ', $fullName);
-        return $names[0] ?? $fullName;
+        try {
+            $request->validate([
+                'course_id' => 'required|integer|exists:courses,id'
+            ]);
+
+            $user = Auth::user();
+            $student = $user->student()->first();
+
+            if (!$student) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+
+            // Get the course to validate it exists and is active
+            $course = Course::find($request->course_id);
+            if (!$course) {
+                return response()->json(['success' => false, 'message' => 'Course not found'], 404);
+            }
+
+            if (!$course->is_active) {
+                return response()->json(['success' => false, 'message' => 'This course is not available'], 400);
+            }
+
+            // Update selected course
+            $student->selected_course_id = $request->course_id;
+            $student->save();
+
+            // Recalculate price with new course
+            $this->recalculatePrice($student);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Course selected successfully',
+                'course_id' => $student->selected_course_id,
+                'course_title' => $course->title,
+                'recalculated' => true
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 
     /**
-     * Helper method to get last name
+     * Helper method to recalculate price
      */
-    private function getLastName(string $fullName): string
+    private function recalculatePrice(Student $student): void
     {
-        $names = explode(' ', $fullName);
-        return count($names) > 1 ? end($names) : '';
+        // This will be called when we get payment status
+        // Price will be recalculated in getPaymentStatus()
+    }
+
+    /**
+     * Get available courses for selection
+     */
+    public function getAvailableCourses(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $student = $user->student()->first();
+
+            if (!$student) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+
+            // Get courses based on student's course type
+            $categoryMap = [
+                'Programming' => 'programming',
+                'Language' => 'languages',
+                'School Grades' => 'school-grades',
+                'Entrance Preparation' => 'entrance-exams'
+            ];
+
+            $category = $categoryMap[$student->course_type] ?? null;
+
+            $query = Course::where('is_active', true);
+
+            if ($category) {
+                $query->where('category', $category);
+            }
+
+            $courses = $query->select([
+                'id', 'title', 'description', 'category', 'subcategory',
+                'price_individual', 'price_group', 'duration_hours'
+            ])->get();
+
+            return response()->json([
+                'success' => true,
+                'courses' => $courses,
+                'selected_course_id' => $student->selected_course_id
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 }

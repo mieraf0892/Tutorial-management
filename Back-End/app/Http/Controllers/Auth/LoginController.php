@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -51,45 +52,76 @@ class LoginController extends Controller
     // ============================================
     // UPDATED TUTOR STATUS CHECK
     // ============================================
-    if ($user->isTutor()) {
-        // Check different statuses
-        switch ($user->status) {
-            case 'pending_email_verification':
+    // In LoginController.php, replace the tutor status check with:
+
+if ($user->isTutor()) {
+    Log::info('Tutor login attempt', [
+        'user_id' => $user->id,
+        'email' => $user->email,
+        'user_status' => $user->status,
+        'tutor_is_verified' => $user->tutor->is_verified ?? 'N/A',
+        'tutor_degree_verified' => $user->tutor->degree_verified ?? 'N/A',
+        'has_tutor_profile' => $user->tutor ? 'YES' : 'NO',
+    ]);
+
+    // Check different statuses based on ACTUAL database values
+    switch ($user->status) {
+        case 'pending':
+            // Tutor is pending - check email verification first
+            if (!$user->isEmailVerified()) {
                 throw ValidationException::withMessages([
                     'email' => 'Please verify your email address before logging in. Check your email for verification link.',
                 ]);
-                
-            case 'pending_profile':
+            }
+            
+            // Email verified, check if tutor profile exists
+            if (!$user->tutor) {
                 throw ValidationException::withMessages([
                     'email' => 'Please complete your tutor profile to proceed with admin approval.',
                 ]);
-                
-            case 'pending_approval':
+            }
+            
+            // Profile exists, check verification status
+            if ($user->tutor->is_verified == 0) {
                 throw ValidationException::withMessages([
                     'email' => 'Your tutor account is pending admin approval. You will be notified via email once approved.',
                 ]);
-                
-            case 'rejected':
-                $reason = $user->tutor->rejection_reason ?? 'unspecified reason';
+            }
+            
+            // If verified=1 but still pending status, allow login
+            // This handles edge cases where status wasn't updated
+            break;
+            
+        case 'active':
+            // Active tutors still need to be verified
+            if (!$user->tutor || $user->tutor->is_verified == 0) {
                 throw ValidationException::withMessages([
-                    'email' => "Your tutor application was rejected. Reason: $reason",
+                    'email' => 'Your tutor account is not verified yet. Please wait for admin verification.',
                 ]);
-                
-            case 'suspended':
-                throw ValidationException::withMessages([
-                    'email' => 'Your account has been suspended. Please contact the administrator.',
-                ]);
-                
-            case 'active':
-                // Allow login - continue with normal flow
-                break;
-                
-            default:
-                throw ValidationException::withMessages([
-                    'email' => 'Your account status is invalid. Please contact the administrator.',
-                ]);
-        }
+            }
+            // Allow login
+            break;
+            
+        case 'suspended':
+            throw ValidationException::withMessages([
+                'email' => 'Your account has been suspended. Please contact the administrator.',
+            ]);
+            
+        case 'inactive':
+            throw ValidationException::withMessages([
+                'email' => 'Your account is inactive. Please contact the administrator.',
+            ]);
+            
+        default:
+            Log::warning('Unknown user status on login', [
+                'user_id' => $user->id, 
+                'status' => $user->status
+            ]);
+            throw ValidationException::withMessages([
+                'email' => 'Your account status is invalid. Please contact support.',
+            ]);
     }
+}
 
     // For students
     if ($user->isStudent() && !$user->isActive()) {

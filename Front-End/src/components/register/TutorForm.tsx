@@ -33,7 +33,7 @@ const TutorForm = () => {
     password_confirmation: "", 
     age: "", 
     country: "", 
-    phoneCode: "", 
+    phoneCode: "+251", // Default to Ethiopia
     phone: "", 
     city: "", 
     subcity: "", 
@@ -130,175 +130,259 @@ const TutorForm = () => {
   }, [tutorForm.availableDays]);
 
   const handleTutorSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // Set loading state early
-  setIsLoading(true);
-
-  // CAPTCHA validation
-  if (!captchaToken) {
-    toast({
-      title: "Security Verification Required",
-      description: "Please complete the CAPTCHA check.",
-      variant: "destructive",
-    });
-    setIsLoading(false);
-    return;
-  }
-
-  // Validate required fields
-  const errors: string[] = [];
-  
-  // ... your validation code remains the same ...
-
-  if (errors.length > 0) {
-    toast({ 
-      title: "Validation Error", 
-      description: errors.join("\n"), 
-      variant: "destructive" 
-    });
-    setIsLoading(false);
-    return;
-  }
-
-  try {
-    const formData = new FormData();
-
-    // 1. Build subjects array in backend format
-    let subjectsArray: Array<{name: string, specialization: string | null, level: string}> = [];
+    e.preventDefault();
     
-    if (tutorForm.specialty === "Programming") {
-      subjectsArray = tutorForm.specialtyArea.map(area => ({
-        name: area,
-        specialization: tutorForm.specialty,
-        level: tutorForm.subjectLevels[area] || "intermediate"
-      }));
-    } else if (tutorForm.specialty === "Language") {
-      subjectsArray = tutorForm.specialtyLanguages.map(lang => ({
-        name: lang,
-        specialization: "Language",
-        level: tutorForm.subjectLevels[lang] || "intermediate"
-      }));
-    } else if (tutorForm.specialty === "School Grades") {
-      subjectsArray = [{
-        name: tutorForm.curriculum || "School Curriculum",
-        specialization: `Grades ${tutorForm.gradeRange}`,
-        level: "intermediate"
-      }];
+    // Set loading state early
+    setIsLoading(true);
+    
+    console.log("Form submission started...");
+    console.log("Current form state:", tutorForm);
+
+    // CAPTCHA validation
+    if (!captchaToken) {
+      toast({
+        title: "Security Verification Required",
+        description: "Please complete the CAPTCHA check.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
     }
 
-    // 2. Build availability array in backend format
-    const availabilityArray = tutorForm.availableDays.map(day => ({
-      day: day,
-      startTime: tutorForm.availabilityTimes[day]?.start || "09:00",
-      endTime: tutorForm.availabilityTimes[day]?.end || "17:00"
-    }));
+    // Validate required fields
+    const errors: string[] = [];
+    
+    // Required field validation
+    if (!tutorForm.name.trim()) errors.push("Full name is required");
+    if (!tutorForm.fatherName.trim()) errors.push("Father's name is required");
+    if (!tutorForm.email.trim()) errors.push("Email is required");
+    if (!tutorForm.password) errors.push("Password is required");
+    if (tutorForm.password !== tutorForm.password_confirmation) errors.push("Passwords do not match");
+    if (!tutorForm.age) errors.push("Age is required");
+    if (!tutorForm.country) errors.push("Country is required");
+    if (!tutorForm.phoneCode) errors.push("Phone code is required");
+    if (!tutorForm.phone) errors.push("Phone number is required");
+    if (!tutorForm.sex) errors.push("Gender is required");
+    if (!tutorForm.address.trim()) errors.push("Address is required");
+    if (!tutorForm.bio.trim() || tutorForm.bio.length < 50) errors.push("Bio must be at least 50 characters");
+    if (!tutorForm.qualification.trim()) errors.push("Qualification is required");
+    if (!tutorForm.hourlyRate) errors.push("Hourly rate is required");
+    if (!tutorForm.degree) errors.push("Degree level is required");
+    if (!tutorForm.status) errors.push("Professional status is required");
+    if (!tutorForm.degreePhoto) errors.push("Degree photo is required");
+    if (!tutorForm.specialty) errors.push("Please select a specialty");
+    if (tutorForm.availableDays.length === 0) errors.push("Please select at least one available day");
+    if (!tutorForm.tutoringMode) errors.push("Please select a tutoring mode");
+    
+    // Validate numeric fields
+    if (tutorForm.hourlyRate && isNaN(Number(tutorForm.hourlyRate))) {
+      errors.push("Hourly rate must be a valid number");
+    }
+    if (tutorForm.hasExperience === "yes" && !tutorForm.experienceYears) {
+      errors.push("Years of experience is required when you have experience");
+    }
+    if (tutorForm.hasExperience === "yes" && tutorForm.experienceYears && isNaN(Number(tutorForm.experienceYears))) {
+      errors.push("Experience years must be a valid number");
+    }
+    
+    // Specialty-specific validations
+    if (tutorForm.specialty === "Programming" && tutorForm.specialtyArea.length === 0) {
+      errors.push("Please select at least one programming area");
+    }
+    if (tutorForm.specialty === "Language" && tutorForm.specialtyLanguages.length === 0) {
+      errors.push("Please select at least one language");
+    }
+    if (tutorForm.specialty === "School Grades" && (!tutorForm.gradeRange || !tutorForm.curriculum)) {
+      errors.push("Please select grade range and curriculum for school grades");
+    }
 
-    // 3. Append ALL fields to FormData
-    // First, append simple fields
-    formData.append("user_type", "tutor");
-    formData.append("role", "tutor");
-    formData.append("name", tutorForm.name);
-    formData.append("email", tutorForm.email);
-    formData.append("password", tutorForm.password);
-    formData.append("password_confirmation", tutorForm.password_confirmation);
-    formData.append("phone", `${tutorForm.phoneCode}${tutorForm.phone}`);
-    formData.append("age", tutorForm.age);
-    formData.append("sex", tutorForm.sex);
-    formData.append("country", tutorForm.country);
-    formData.append("phoneCode", tutorForm.phoneCode);
-    formData.append("city", tutorForm.city || "");
-    formData.append("subcity", tutorForm.subcity || "");
-    formData.append("address", tutorForm.address);
-    formData.append("bio", tutorForm.bio);
-    formData.append("qualification", tutorForm.qualification);
-    formData.append("experienceYears", tutorForm.hasExperience === "yes" ? tutorForm.experienceYears : "0");
-    formData.append("hourlyRate", tutorForm.hourlyRate);
-    formData.append("degree", tutorForm.degree);
-    formData.append("status", tutorForm.status);
-    formData.append("previousExperience", tutorForm.hasExperience);
-    formData.append("previousGrades", tutorForm.previousGrades || "");
-    formData.append("tutoringMode", tutorForm.tutoringMode);
-    formData.append("tutoringArea", tutorForm.tutoringArea || "");
-    formData.append("captcha_token", captchaToken);
+    if (errors.length > 0) {
+      toast({ 
+        title: "Validation Error", 
+        description: errors.join("\n"), 
+        variant: "destructive",
+        duration: 5000
+      });
+      setIsLoading(false);
+      return;
+    }
 
-    // 4. Append subjects array properly (DO NOT stringify!)
-    subjectsArray.forEach((subject, index) => {
-      formData.append(`subjects[${index}][name]`, subject.name);
-      if (subject.specialization) {
-        formData.append(`subjects[${index}][specialization]`, subject.specialization);
+    try {
+      const formData = new FormData();
+
+      // 1. Build subjects array in backend format
+      let subjectsArray: Array<{name: string, specialization: string | null, level: string}> = [];
+      
+      if (tutorForm.specialty === "Programming") {
+        subjectsArray = tutorForm.specialtyArea.map(area => ({
+          name: area,
+          specialization: tutorForm.specialty,
+          level: tutorForm.subjectLevels[area] || "intermediate"
+        }));
+      } else if (tutorForm.specialty === "Language") {
+        subjectsArray = tutorForm.specialtyLanguages.map(lang => ({
+          name: lang,
+          specialization: "Language",
+          level: tutorForm.subjectLevels[lang] || "intermediate"
+        }));
+      } else if (tutorForm.specialty === "School Grades") {
+        subjectsArray = [{
+          name: tutorForm.curriculum || "School Curriculum",
+          specialization: `Grades ${tutorForm.gradeRange}`,
+          level: tutorForm.subjectLevels["school"] || "intermediate"
+        }];
       }
-      formData.append(`subjects[${index}][level]`, subject.level);
-    });
 
-    // 5. Append availability array properly (DO NOT stringify!)
-    availabilityArray.forEach((slot, index) => {
-      formData.append(`availability[${index}][day]`, slot.day);
-      formData.append(`availability[${index}][startTime]`, slot.startTime);
-      formData.append(`availability[${index}][endTime]`, slot.endTime);
-    });
+      // 2. Build availability array in backend format
+      const availabilityArray = tutorForm.availableDays.map(day => ({
+        day: day,
+        startTime: tutorForm.availabilityTimes[day]?.start || "09:00",
+        endTime: tutorForm.availabilityTimes[day]?.end || "17:00"
+      }));
 
-    // 6. Add file
-    if (tutorForm.degreePhoto) {
-      formData.append("degreePhoto", tutorForm.degreePhoto);
-    }
+      // Helper function to append fields
+      const appendField = (formData: FormData, key: string, value: string) => {
+        formData.append(key, value);
+        
+        // Also append snake_case version if key is camelCase
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        if (snakeKey !== key) {
+          formData.append(snakeKey, value);
+        }
+      };
 
-    // Debug: Log what we're sending
-    console.log("Subjects array:", subjectsArray);
-    console.log("Availability array:", availabilityArray);
-    
-    // Log FormData contents
-    for (let [key, value] of formData.entries()) {
-      console.log(key, value);
-    }
+      // 3. Append ALL fields to FormData
+      formData.append("user_type", "tutor");
+      formData.append("role", "tutor");
+      
+      // Personal info
+      appendField(formData, "name", tutorForm.name);
+      appendField(formData, "fatherName", tutorForm.fatherName);
+      appendField(formData, "email", tutorForm.email);
+      appendField(formData, "password", tutorForm.password);
+      appendField(formData, "passwordConfirmation", tutorForm.password_confirmation);
+      appendField(formData, "phone", `${tutorForm.phoneCode}${tutorForm.phone}`);
+      appendField(formData, "phoneCode", tutorForm.phoneCode);
+      appendField(formData, "age", tutorForm.age);
+      appendField(formData, "sex", tutorForm.sex);
+      appendField(formData, "country", tutorForm.country);
+      appendField(formData, "city", tutorForm.city || "");
+      appendField(formData, "subcity", tutorForm.subcity || "");
+      appendField(formData, "address", tutorForm.address);
+      
+      // Professional info
+      appendField(formData, "bio", tutorForm.bio);
+      appendField(formData, "qualification", tutorForm.qualification);
+      appendField(formData, "experienceYears", tutorForm.hasExperience === "yes" ? tutorForm.experienceYears : "0");
+      appendField(formData, "hourlyRate", tutorForm.hourlyRate);
+      appendField(formData, "degree", tutorForm.degree);
+      appendField(formData, "status", tutorForm.status);
+      appendField(formData, "previousExperience", tutorForm.hasExperience);
+      appendField(formData, "previousGrades", tutorForm.previousGrades || "");
+      appendField(formData, "tutoringMode", tutorForm.tutoringMode);
+      appendField(formData, "tutoringArea", tutorForm.tutoringArea || "");
+      formData.append("captcha_token", captchaToken);
 
-    // 7. Make API request
-    await apiClient.post("/register/tutor", formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
+      // 4. Append subjects array properly
+      subjectsArray.forEach((subject, index) => {
+        formData.append(`subjects[${index}][name]`, subject.name);
+        if (subject.specialization) {
+          formData.append(`subjects[${index}][specialization]`, subject.specialization);
+        }
+        formData.append(`subjects[${index}][level]`, subject.level);
+      });
+
+      // 5. Append availability array properly
+      availabilityArray.forEach((slot, index) => {
+        formData.append(`availability[${index}][day]`, slot.day);
+        formData.append(`availability[${index}][startTime]`, slot.startTime);
+        formData.append(`availability[${index}][endTime]`, slot.endTime);
+      });
+
+      // 6. Add file
+      if (tutorForm.degreePhoto) {
+        formData.append("degreePhoto", tutorForm.degreePhoto);
       }
-    });
 
-    // ✅ RESET CAPTCHA ON SUCCESS
-    recaptchaRef.current?.reset();
-    setCaptchaToken("");
+      // Debug: Log FormData contents
+      console.log("=== FormData Contents ===");
+      for (let [key, value] of formData.entries()) {
+        console.log(`${key}:`, value);
+      }
+      console.log("=========================");
 
-    toast({ 
-      title: "Registration Successful",
-      description: "Your application has been submitted for review. We'll notify you once approved."
-    });
-    
-    // Reset form
-    setTutorForm({
-      name: "", fatherName: "", email: "", password: "", password_confirmation: "", 
-      age: "", country: "", phoneCode: "", phone: "", city: "", subcity: "", 
-      sex: "", address: "", bio: "", qualification: "", hourlyRate: "",
-      hasExperience: "no", experienceYears: "", previousGrades: "",
-      degree: "", status: "", degreePhoto: null, specialty: "", 
-      specialtyArea: [], specialtyLanguages: [], gradeRange: "", curriculum: "", 
-      availableDays: [], availabilityTimes: {}, subjectLevels: {}, 
-      tutoringMode: "", tutoringArea: ""
-    });
-    
-    navigate("/login");
-    
-  } catch (err: any) {
-    /** 🔁 RESET CAPTCHA ON SERVER FAILURE */
-    recaptchaRef.current?.reset();
-    setCaptchaToken("");
+      // 7. Make API request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    console.error("Registration error:", err.response?.data);
-    
-    toast({
-      title: "Registration Failed",
-      description: err.response?.data?.message || 
-                 (err.response?.data?.errors ? JSON.stringify(err.response.data.errors) : "Server rejected the request."),
-      variant: "destructive",
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
+      await apiClient.post("/register/tutor", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      // ✅ RESET CAPTCHA ON SUCCESS
+      recaptchaRef.current?.reset();
+      setCaptchaToken("");
+
+      toast({ 
+        title: "Registration Successful",
+        description: "Your application has been submitted for review. We'll notify you once approved.",
+        variant: "default"
+      });
+      
+      // Reset form
+      setTutorForm({
+        name: "", fatherName: "", email: "", password: "", password_confirmation: "", 
+        age: "", country: "", phoneCode: "+251", phone: "", city: "", subcity: "", 
+        sex: "", address: "", bio: "", qualification: "", hourlyRate: "",
+        hasExperience: "no", experienceYears: "", previousGrades: "",
+        degree: "", status: "", degreePhoto: null, specialty: "", 
+        specialtyArea: [], specialtyLanguages: [], gradeRange: "", curriculum: "", 
+        availableDays: [], availabilityTimes: {}, subjectLevels: {}, 
+        tutoringMode: "", tutoringArea: ""
+      });
+      
+      navigate("/login");
+      
+    } catch (err: any) {
+      /** 🔁 RESET CAPTCHA ON ANY ERROR */
+      recaptchaRef.current?.reset();
+      setCaptchaToken("");
+
+      console.error("Registration error:", err);
+      
+      let errorMessage = "An unexpected error occurred. Please try again.";
+      
+      if (err.name === 'AbortError') {
+        errorMessage = "Request timeout. Please check your connection and try again.";
+      } else if (err.response) {
+        // Server responded with error
+        if (err.response.data?.errors) {
+          // Laravel validation errors
+          const errors = err.response.data.errors;
+          errorMessage = Object.values(errors).flat().join('\n');
+        } else if (err.response.data?.message) {
+          errorMessage = err.response.data.message;
+        }
+      } else if (err.request) {
+        // Request was made but no response
+        errorMessage = "No response from server. Please check your connection.";
+      }
+      
+      toast({
+        title: "Registration Failed",
+        description: errorMessage,
+        variant: "destructive",
+        duration: 5000
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const toggleDay = (day: string) => {
     setTutorForm(prev => ({
@@ -307,10 +391,6 @@ const TutorForm = () => {
         ? prev.availableDays.filter(d => d !== day)
         : [...prev.availableDays, day]
     }));
-  };
-
-  const toggleItem = (item: string, array: string[], setter: (val: string[]) => void) => {
-    setter(array.includes(item) ? array.filter(i => i !== item) : [...array, item]);
   };
 
   return (
@@ -367,7 +447,16 @@ const TutorForm = () => {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="t-country">Country *</Label>
-            <Select value={tutorForm.country} onValueChange={(val) => setTutorForm({...tutorForm, country: val, phoneCode: phoneCodes[val] || "+1", city: "", subcity: ""})}>
+            <Select value={tutorForm.country} onValueChange={(val) => {
+              const code = phoneCodes[val] || "+1";
+              setTutorForm({
+                ...tutorForm, 
+                country: val, 
+                phoneCode: code,
+                city: "", 
+                subcity: ""
+              });
+            }}>
               <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
               <SelectContent className="max-h-60">{countries.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
@@ -375,7 +464,7 @@ const TutorForm = () => {
           <div className="space-y-2">
             <Label htmlFor="t-phone">Phone Number *</Label>
             <div className="flex gap-2">
-              <Input className="w-24" value={tutorForm.phoneCode} readOnly placeholder="+1" />
+              <Input className="w-24" value={tutorForm.phoneCode} readOnly placeholder="+251" />
               <Input id="t-phone" type="tel" value={tutorForm.phone} onChange={(e) => setTutorForm({...tutorForm, phone: e.target.value})} required />
             </div>
           </div>
@@ -518,7 +607,7 @@ const TutorForm = () => {
           </div>
         </div>
 
-        {/* Experience Section - Fixed! */}
+        {/* Experience Section */}
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>

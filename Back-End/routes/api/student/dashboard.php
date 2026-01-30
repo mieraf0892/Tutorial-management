@@ -7,4 +7,5 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('student')->group(function () {
     Route::get('/dashboard', [StudentController::class, 'dashboard']);
     Route::get('/enrolled-tutorials', [StudentController::class, 'enrolledTutorials']);
+    Route::get('/preferences', [StudentController::class, 'getPreferences']);
 });

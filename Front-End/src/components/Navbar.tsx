@@ -61,7 +61,7 @@ const Navbar = () => {
   // Mobile navigation items
   const mobileNavItems = [
     { icon: Home, label: "Home", href: "/" },
-    { icon: GraduationCap, label: "Tutorials", href: "/tutorials" },
+    { icon: GraduationCap, label: "Courses", href: "/courses" },
     { icon: FolderOpen, label: "Categories", href: "/categories" },
     { icon: Users, label: "About", href: "/about" },
   ];
@@ -90,8 +90,8 @@ const Navbar = () => {
               <Link to="/" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
                 Home
               </Link>
-              <Link to="/tutorials" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
-                Tutorials
+              <Link to="/courses" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
+                Courses
               </Link>
               <Link to="/categories" className="text-sm font-medium text-foreground hover:text-primary transition-colors">
                 Categories

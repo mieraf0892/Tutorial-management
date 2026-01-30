@@ -24,6 +24,12 @@ return new class extends Migration
             $table->string('subcity')->nullable();
             $table->text('address');
             $table->enum('course_type', ['Programming', 'Language', 'School Grades', 'Entrance Preparation']);
+            
+            // Payment columns
+            $table->boolean('is_paid')->default(false); 
+            // 10 digits total, 2 digits after the decimal point (e.g., 99,999,999.99)
+            $table->decimal('final_price', 10, 2)->nullable()->default(0.00); 
+
             $table->timestamps();
         });
     }

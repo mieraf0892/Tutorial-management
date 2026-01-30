@@ -1,5 +1,4 @@
 <?php
-// app/Models/Lesson.php
 
 namespace App\Models;
 
@@ -11,13 +10,20 @@ class Lesson extends Model
     use HasFactory;
 
     protected $fillable = [
-        'tutorial_id', 'title', 'description', 'duration', 'order',
-        'video_url', 'content', 'is_preview', 'is_locked'
+        'tutorial_id',
+        'title',
+        'description',
+        'duration',
+        'order',
+        'video_url',
+        'content',          // rich text / markdown
+        'is_preview',
+        'is_locked',
     ];
 
     protected $casts = [
         'is_preview' => 'boolean',
-        'is_locked' => 'boolean'
+        'is_locked'  => 'boolean',
     ];
 
     public function tutorial()
@@ -28,5 +34,16 @@ class Lesson extends Model
     public function completions()
     {
         return $this->hasMany(LessonCompletion::class);
+    }
+
+    // Helper: Is this lesson accessible without enrollment?
+    public function isPreviewOnly()
+    {
+        return $this->is_preview && !$this->is_locked;
+    }
+
+    public function materials()
+    {
+        return $this->hasMany(LessonMaterial::class);
     }
 }

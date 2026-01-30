@@ -35,6 +35,7 @@ import { apiClient } from "@/lib/api";
 // Import components
 import UsersTab from "@/components/Admin-Dashboard/UsersTab";
 import ClassesTab from "@/components/Admin-Dashboard/ClassesTab";
+import CourseCatalogTab from "@/components/Admin-Dashboard/CourseCatalogTab";
 import AnalyticsTab from "@/components/Admin-Dashboard/AnalyticsTab";
 import AdminOverview from "@/components/Admin-Dashboard/AdminOverview";
 import TutorOnboardingTab from "@/components/Admin-Dashboard/TutorOnboardingTab";
@@ -115,11 +116,18 @@ interface DashboardData {
 }
 
 // Admin-specific navigation items
+// Find this array in your AdminDashboard.tsx:
 const adminNavigationItems = [
   { title: "Overview", value: "overview", icon: LayoutDashboard },
   { title: "User Management", value: "users", icon: Users },
   { title: "Tutor Onboarding", value: "tutor-onboarding", icon: UserCheck },
-  { title: "Class Management", value: "classes", icon: BookOpen },
+  
+  // 🆕 ADD THIS LINE - Course Catalog (NEW)
+  { title: "Course Catalog", value: "courses", icon: BookOpen },
+  
+  // Rename this from "Class Management" to "Group Classes" for clarity
+  { title: "Group Classes", value: "classes", icon: Users },
+  
   { title: "Pending Approvals", value: "pending-approvals", icon: Clock },
   { title: "Assignments", value: "assignments", icon: ClipboardList },
   { title: "Reporting", value: "reporting", icon: ClipboardCheck },
@@ -149,8 +157,7 @@ export default function AdminDashboard() {
   const [pendingTutors, setPendingTutors] = useState<PendingTutor[]>([]);
   const [showCreateClass, setShowCreateClass] = useState(false);
 
-  // In your AdminDashboard.tsx, update the data fetching functions:
-
+  // ✅ FIX: Update fetchDashboardData to use correct endpoint
 const fetchDashboardData = async () => {
   try {
     setLoading(true);
@@ -175,9 +182,10 @@ const fetchDashboardData = async () => {
         classes: user.enrollments_count || user.tutorials_count || 0
       }));
 
+      // ✅ FIX: Use the correct endpoint for pending tutors
       const pendingResponse = await apiClient.get("/tutor-approvals/pending");
       const pendingTutors = pendingResponse.data.success 
-        ? pendingResponse.data.tutors?.data || []
+        ? pendingResponse.data.tutors || []  // Changed from data.tutors.data
         : [];
 
       setDashboardData({
@@ -199,7 +207,7 @@ const fetchDashboardData = async () => {
         users: mappedUsers,
         pending_tutors: pendingTutors,
         pending_reports: data.pending_reports || [],
-        classes: data.classes || [] // Add classes data if available
+        classes: data.classes || []
       });
     } else {
       throw new Error(data.message || "Failed to load dashboard");
@@ -218,6 +226,62 @@ const fetchDashboardData = async () => {
     }
   } finally {
     setLoading(false);
+  }
+};
+
+// ✅ FIX: Update handleApproveTutor function
+const handleApproveTutor = async (tutorId: number) => {
+  try {
+    // Use correct endpoint - this sends the welcome email
+    const response = await apiClient.post(`/tutor-approvals/${tutorId}/approve`);
+    
+    if (response.data.success) {
+      toast({
+        title: "✅ Tutor Approved",
+        description: response.data.message || "Tutor approved successfully! Welcome email sent.",
+        duration: 5000,
+      });
+      
+      // Refresh data
+      fetchTabData("tutor-onboarding");
+      fetchDashboardData(); // Also refresh overview stats
+    }
+  } catch (error: any) {
+    console.error("Approve tutor error:", error);
+    toast({
+      title: "Approval Failed",
+      description: error.response?.data?.message || "Failed to approve tutor",
+      variant: "destructive"
+    });
+  }
+};
+
+// ✅ FIX: Update handleRejectTutor function
+const handleRejectTutor = async (tutorId: number, rejectionReason: string) => {
+  try {
+    // Use correct endpoint - this sends the rejection email
+    const response = await apiClient.post(`/tutor-approvals/${tutorId}/reject`, {
+      rejection_reason: rejectionReason
+    });
+    
+    if (response.data.success) {
+      toast({
+        title: "❌ Tutor Rejected",
+        description: response.data.message || "Tutor application rejected. Notification email sent.",
+        duration: 5000,
+      });
+      
+      // Refresh data
+      fetchTabData("tutor-onboarding");
+      fetchDashboardData(); // Also refresh overview stats
+    }
+  } catch (error: any) {
+    console.error("Reject tutor error:", error);
+    toast({
+      title: "Rejection Failed",
+      description: error.response?.data?.message || "Failed to reject tutor",
+      variant: "destructive"
+    });
   }
 };
 
@@ -253,9 +317,10 @@ const fetchTabData = async (tab: string) => {
       }
       
       case "tutor-onboarding": {
+        // ✅ FIX: Use correct endpoint
         const tutorsResponse = await apiClient.get("/tutor-approvals/pending");
         if (tutorsResponse.data.success && dashboardData) {
-          const tutorsData = tutorsResponse.data.tutors?.data || [];
+          const tutorsData = tutorsResponse.data.tutors || [];
           setDashboardData(prev => prev ? {
             ...prev,
             pending_tutors: tutorsData
@@ -263,7 +328,6 @@ const fetchTabData = async (tab: string) => {
         }
         break;
       }
-      
       case "reporting": {
         const reportsResponse = await apiClient.get("/admin/pending-reports");
         if (reportsResponse.data.success && dashboardData) {
@@ -309,6 +373,13 @@ case "classes": {
       classes: mappedClasses
     } : null);
   }
+  break;
+}
+
+// In the fetchTabData function, add a case for "courses":
+case "courses": {
+  // We'll implement proper data fetching in the next step
+  // For now, just show the placeholder
   break;
 }
 
@@ -362,27 +433,6 @@ const handleFilterClick = () => {
     navigate("/login");
   };
 
-  const handleApproveTutor = async (tutorId: number) => {
-  try {
-    // Use correct endpoint
-    const response = await apiClient.post(`/tutor-approvals/${tutorId}/approve`);
-    
-    if (response.data.success) {
-      toast({
-        title: "Tutor Approved",
-        description: response.data.message || "Tutor approved successfully!",
-      });
-      // Refresh data
-      fetchTabData("tutor-onboarding");
-    }
-  } catch (error: any) {
-    toast({
-      title: "Approval Failed",
-      description: error.response?.data?.message || "Failed to approve tutor",
-      variant: "destructive"
-    });
-  }
-};
 
   const fetchPendingTutors = async () => {
   try {
@@ -399,30 +449,6 @@ const handleFilterClick = () => {
       title: "Error",
       description: "Failed to load pending tutors",
       variant: "destructive",
-    });
-  }
-};
-
-  const handleRejectTutor = async (tutorId: number, rejectionReason: string) => {
-  try {
-    // Use correct endpoint
-    const response = await apiClient.post(`/admin/tutor-approvals/${tutorId}/reject`, {
-      rejection_reason: rejectionReason
-    });
-    
-    if (response.data.success) {
-      toast({
-        title: "Tutor Rejected",
-        description: response.data.message || "Tutor application rejected.",
-      });
-      // Refresh data
-      fetchTabData("tutor-onboarding");
-    }
-  } catch (error: any) {
-    toast({
-      title: "Rejection Failed",
-      description: error.response?.data?.message || "Failed to reject tutor",
-      variant: "destructive"
     });
   }
 };
@@ -560,7 +586,8 @@ const handleFilterClick = () => {
               <SidebarTrigger />
               <div className="min-w-0 flex-1">
                 <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">
-                  {activeTab === "overview" ? "Admin Dashboard" : 
+                  {activeTab === "courses" ? "Course Catalog" : 
+                   activeTab === "overview" ? "Admin Dashboard" : 
                    activeTab === "tutor-onboarding" ? "Tutor Onboarding" :
                    activeTab === "communication" ? "Communication Center" :
                    activeTab === "attendance" ? "Attendance Tracking" :
@@ -674,7 +701,7 @@ const handleFilterClick = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-xs bg-card hover:bg-accent border-border text-red-600 border-red-200 hover:bg-red-50"
+                      className="text-xs bg-card hover:bg-accent border-border text-red-600"
                     >
                       Suspended
                     </Button>
@@ -738,15 +765,16 @@ const handleFilterClick = () => {
                 />
               )}
 
-              {activeTab === "tutor-onboarding" && (
-                <TutorOnboardingTab
-                  pendingTutors={pending_tutors}
-                  onApproveTutor={handleApproveTutor}
-                  onRejectTutor={handleRejectTutor}
-                  onRefresh={() => fetchTabData("tutor-onboarding")}
-                  showDegreeVerification={true}
-                />
-              )}
+             {/* ✅ FIX: Add condition for tutor-onboarding tab */}
+  {activeTab === "tutor-onboarding" && (
+    <TutorOnboardingTab
+      pendingTutors={dashboardData.pending_tutors || []}
+      onApproveTutor={handleApproveTutor}
+      onRejectTutor={handleRejectTutor}
+      onRefresh={() => fetchTabData("tutor-onboarding")}
+      showDegreeVerification={true}
+    />
+  )}
 
               {activeTab === "classes" && (
                 <ClassesTab 
@@ -757,6 +785,14 @@ const handleFilterClick = () => {
                   onCreateClass={() => setShowCreateClass(true)}
                 />
               )}
+
+            
+{activeTab === "courses" && (
+  <CourseCatalogTab
+    searchQuery={searchQuery}
+    onRefresh={() => fetchTabData("courses")}
+  />
+)}
 
 {activeTab === "pending-approvals" && (
   <PendingTutorialsTab

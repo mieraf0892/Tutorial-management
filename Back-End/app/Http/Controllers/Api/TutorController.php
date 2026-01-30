@@ -10,9 +10,14 @@ use App\Models\Attendance;
 use App\Models\Enrollment;
 use App\Models\TutorialAssignment;
 use App\Models\User;
+use App\Models\LiveSession;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class TutorController extends Controller
 {
@@ -88,24 +93,30 @@ class TutorController extends Controller
                         'average_rating' => 4.5, // You can calculate this from reviews
                     ],
                     'tutorials' => $tutorials->map(function($tutorial) {
-                        $studentCount = Enrollment::where('tutorial_id', $tutorial->id)->count();
-                        $sessionCount = TutorialSession::where('tutorial_id', $tutorial->id)->count();
-                        $completedSessionCount = TutorialSession::where('tutorial_id', $tutorial->id)
-                            ->where('status', 'completed')
-                            ->count();
+    $studentCount = Enrollment::where('tutorial_id', $tutorial->id)->count();
+    $sessionCount = TutorialSession::where('tutorial_id', $tutorial->id)->count();
+    $completedSessionCount = TutorialSession::where('tutorial_id', $tutorial->id)
+        ->where('status', 'completed')
+        ->count();
 
-                        return [
-                            'id' => $tutorial->id,
-                            'title' => $tutorial->title,
-                            'description' => $tutorial->description,
-                            'category' => $tutorial->category->name ?? 'Uncategorized',
-                            'image' => $tutorial->image,
-                            'student_count' => $studentCount,
-                            'total_sessions' => $sessionCount,
-                            'completed_sessions' => $completedSessionCount,
-                            'created_at' => $tutorial->created_at,
-                        ];
-                    }),
+    return [
+        'id' => $tutorial->id,
+        'title' => $tutorial->title,
+        'description' => $tutorial->description,
+        'category' => $tutorial->category->name ?? 'Uncategorized',
+        'image' => $tutorial->image,
+        'student_count' => $studentCount,
+        'total_sessions' => $sessionCount,
+        'completed_sessions' => $completedSessionCount,
+        'created_at' => $tutorial->created_at,
+        // ADD THESE FIELDS:
+        'status' => $tutorial->status,
+        'is_published' => $tutorial->is_published,
+        'rejection_reason' => $tutorial->rejection_reason,
+        'course_id' => $tutorial->course_id,
+        'course_title' => $tutorial->course->title ?? null,
+    ];
+}),
                     'upcoming_sessions' => $upcomingSessions->map(function($session) {
                         $studentCount = Enrollment::where('tutorial_id', $session->tutorial_id)->count();
                         $attendanceMarked = Attendance::where('tutorial_session_id', $session->id)->exists();
@@ -289,27 +300,279 @@ public function studentsList(Request $request)
     }
 }
 
-public function getTutorTutorials()
+/**
+ * Get tutor's accepted courses (for creating tutorials)
+ */
+public function getCourses(Request $request)
 {
     try {
         $user = Auth::user();
         
-        $tutorials = Tutorial::where('tutor_id', $user->id)
-            ->select('id', 'title')
+        // Get accepted individual assignments grouped by course
+        $individualCourses = DB::table('student_tutor_assignments as sta')
+            ->select(
+                'c.id as course_id',
+                'c.title as course_title',
+                'c.description as course_description',
+                'c.duration_hours',
+                DB::raw("'individual' as assignment_type"),
+                DB::raw('COUNT(DISTINCT sta.student_id) as student_count'),
+                DB::raw('GROUP_CONCAT(DISTINCT s.name) as student_names'),
+                DB::raw('MAX(sta.created_at) as last_assignment_date')
+            )
+            ->join('courses as c', 'sta.course_id', '=', 'c.id')
+            ->join('users as s', 'sta.student_id', '=', 's.id')
+            ->where('sta.tutor_id', $user->id)
+            ->where('sta.tutor_status', 'accepted')
+            ->whereNull('sta.class_id') // Only individual assignments
+            ->groupBy('c.id', 'c.title', 'c.description', 'c.duration_hours')
             ->get();
+
+        // Get accepted classes grouped by course
+        $classCourses = DB::table('classes as cls')
+            ->select(
+                'c.id as course_id',
+                'c.title as course_title',
+                'c.description as course_description',
+                'c.duration_hours',
+                DB::raw("'class' as assignment_type"),
+                DB::raw('cls.current_enrollment as student_count'),
+                DB::raw('cls.title as class_title'),
+                DB::raw('cls.batch_name'),
+                DB::raw('cls.created_at as last_assignment_date')
+            )
+            ->join('courses as c', 'cls.course_id', '=', 'c.id')
+            ->where('cls.tutor_id', $user->id)
+            ->where('cls.tutor_status', 'accepted')
+            ->get();
+
+        // Combine and format the data
+        $courses = $individualCourses->merge($classCourses)->map(function($course) {
+            return [
+                'course_id' => $course->course_id,
+                'course_title' => $course->course_title,
+                'course_description' => $course->course_description,
+                'duration_hours' => $course->duration_hours,
+                'assignment_type' => $course->assignment_type,
+                'student_count' => $course->student_count,
+                'student_names' => $course->student_names ?? null,
+                'class_title' => $course->class_title ?? null,
+                'batch_name' => $course->batch_name ?? null,
+                'last_assignment_date' => $course->last_assignment_date,
+                'has_tutorials' => false // We'll update this in next step
+            ];
+        });
 
         return response()->json([
             'success' => true,
-            'tutorials' => $tutorials
+            'courses' => $courses,
+            'stats' => [
+                'total_courses' => $courses->count(),
+                'individual_courses' => $individualCourses->count(),
+                'class_courses' => $classCourses->count(),
+                'total_students' => $individualCourses->sum('student_count') + $classCourses->sum('student_count')
+            ]
         ]);
 
     } catch (\Exception $e) {
-        Log::error('Get tutor tutorials error: ' . $e->getMessage());
+        Log::error('Get tutor courses error: ' . $e->getMessage());
         return response()->json([
             'success' => false,
-            'message' => 'Failed to fetch tutorials',
+            'message' => 'Failed to fetch courses',
             'error' => $e->getMessage()
         ], 500);
+    }
+}
+
+public function createTutorial(Request $request)
+{
+    try {
+        $user = Auth::user();
+        
+        // Validate the request
+        $validated = $request->validate([
+            // Required fields
+            'title' => 'required|string|max:255',
+            'description' => 'required|string',
+            'course_id' => 'required|exists:courses,id',
+            'level' => 'required|in:beginner,intermediate,advanced',
+            
+            // Content arrays (will be JSON encoded)
+            'learning_objectives' => 'nullable|array',
+            'learning_objectives.*' => 'nullable|string|max:500',
+            'requirements' => 'nullable|array',
+            'requirements.*' => 'nullable|string|max:500',
+            
+            // Tutor info
+            'instructor_bio' => 'nullable|string',
+            
+            // Optional schedule fields
+            'batch_name' => 'nullable|string|max:255',
+            'schedule' => 'nullable|string|max:500',
+            'start_date' => 'nullable|date',
+            
+            // Status
+            'status' => 'nullable|in:draft,pending_approval',
+        ]);
+
+        // Check if tutor has access to this course
+        $courseId = $validated['course_id'];
+        
+        $hasAssignment = DB::table('student_tutor_assignments')
+            ->where('course_id', $courseId)
+            ->where('tutor_id', $user->id)
+            ->where('tutor_status', 'accepted')
+            ->exists();
+        
+        $hasClass = DB::table('classes')
+            ->where('course_id', $courseId)
+            ->where('tutor_id', $user->id)
+            ->where('tutor_status', 'accepted')
+            ->exists();
+        
+        if (!$hasAssignment && !$hasClass) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to this course or need to accept the assignment first'
+            ], 403);
+        }
+
+        // Get course details to inherit some fields
+        $course = DB::table('courses')->find($courseId);
+        
+        // Prepare tutorial data - MATCHING DATABASE SCHEMA
+        $tutorialData = [
+            // REQUIRED FIELDS (NOT NULL in database)
+            'tutor_id' => $user->id,
+            'course_id' => $courseId,
+            'title' => $validated['title'],
+            'batch_name' => $validated['batch_name'] ?? 'Content Package',
+            'enrollment_code' => 'TUT-' . $courseId . '-' . strtoupper(Str::random(6)),
+            'schedule' => $validated['schedule'] ?? 'Flexible schedule',
+            'start_date' => $validated['start_date'] ?? now()->addWeek()->format('Y-m-d'),
+            'instructor' => $user->name,
+            
+            // CONTENT FIELDS
+            'description' => $validated['description'],
+            'level' => $validated['level'],
+            
+            // Inherit from course
+            'price' => $course->price_group ?? 0,
+            'duration_hours' => $course->duration_hours ?? 10,
+            
+            // Content arrays (JSON encoded for text fields)
+            'learning_outcomes' => !empty($validated['learning_objectives']) 
+                ? json_encode($validated['learning_objectives'])
+                : json_encode(['Learn course material effectively']),
+            'requirements' => !empty($validated['requirements']) 
+                ? json_encode($validated['requirements'])
+                : json_encode(['Basic understanding required']),
+            
+            // Tutor info
+            'instructor_bio' => $validated['instructor_bio'] ?? '',
+            
+            // Optional fields with defaults
+            'end_date' => null, // No end date for content package
+            'max_capacity' => 0, // No capacity limit for content
+            'current_enrollment' => 0,
+            'image' => null,
+            'content' => '', // Main content area
+            'curriculum' => '', // Can be filled later
+            'rating' => 0.0,
+            'lessons_count' => 0,
+            
+            // Status
+            'status' => $validated['status'] ?? 'draft',
+            'is_published' => false,
+        ];
+
+        $tutorial = Tutorial::create($tutorialData);
+
+        // Send notification to admin if submitted for approval
+        if (($validated['status'] ?? 'draft') === 'pending_approval') {
+            $this->sendTutorialCreatedNotification($user, $tutorial, $courseId);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => ($validated['status'] ?? 'draft') === 'pending_approval' 
+                ? 'Tutorial submitted for admin approval.' 
+                : 'Tutorial saved as draft.',
+            'tutorial' => $tutorial
+        ], 201);
+
+    } catch (\Exception $e) {
+        Log::error('Create tutorial error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to create tutorial',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Submit draft tutorial for admin approval
+ */
+public function submitForApproval(Request $request, $tutorialId)
+{
+    try {
+        $user = Auth::user();
+        
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+        
+        // Check if tutorial is in draft status
+        if ($tutorial->status !== 'draft') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only draft tutorials can be submitted for approval'
+            ], 422);
+        }
+        
+        // Update status
+        $tutorial->update([
+            'status' => 'pending_approval',
+            'updated_at' => now()
+        ]);
+        
+        // Send notification to admin
+        $this->sendTutorialCreatedNotification($user, $tutorial, $tutorial->course_id);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Tutorial submitted for admin approval',
+            'tutorial' => $tutorial
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Submit for approval error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to submit tutorial for approval',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+private function sendTutorialCreatedNotification($tutor, $tutorial, $courseId)
+{
+    try {
+        $course = DB::table('courses')->find($courseId);
+        $adminUsers = User::where('role', 'admin')->get();
+        
+        foreach ($adminUsers as $admin) {
+            DB::table('messages')->insert([
+                'sender_id' => $tutor->id,
+                'receiver_id' => $admin->id,
+                'message' => "📚 New Tutorial Created\nCourse: {$course->title}\nTutorial: {$tutorial->title}\nTutor: {$tutor->name}\n\nPlease review and approve this tutorial.",
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+    } catch (\Exception $e) {
+        Log::error('Send tutorial notification error: ' . $e->getMessage());
     }
 }
 
@@ -373,70 +636,6 @@ public function getTutorTutorials()
             'schedule' => []
         ]);
     }
-
-    
-public function createTutorial(Request $request)
-{
-    try {
-        $user = Auth::user();
-        
-        // Validate the request - match frontend field names
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'category_id' => 'required|exists:categories,id',
-            'level' => 'required|in:beginner,intermediate,advanced',
-            'price' => 'required|numeric|min:0',
-            'duration' => 'required|integer|min:1',
-            'image' => 'nullable|string',
-            'learning_objectives' => 'nullable|array',
-            'requirements' => 'nullable|array',
-            'instructor' => 'nullable|string',
-            'instructor_bio' => 'nullable|string',
-            'lessons' => 'nullable|integer|min:0',
-            'includes' => 'nullable|array',
-        ]);
-
-        // Create the tutorial - tutor creates, needs admin approval
-        $tutorial = Tutorial::create([
-            'tutor_id' => $user->id,
-            'created_by_role' => 'tutor',
-            'title' => $validated['title'],
-            'description' => $validated['description'],
-            'category_id' => $validated['category_id'],
-            'level' => $validated['level'],
-            'price' => $validated['price'],
-            'duration' => $validated['duration'],
-            'image' => $validated['image'] ?? null,
-            'learning_objectives' => $validated['learning_objectives'] ?? [],
-            'requirements' => $validated['requirements'] ?? [],
-            'instructor' => $validated['instructor'] ?? $user->name,
-            'instructor_bio' => $validated['instructor_bio'] ?? '',
-            'instructor_experience' => '',
-            'lessons' => $validated['lessons'] ?? 0,
-            'includes' => $validated['includes'] ?? [],
-            'is_published' => false, // Not published until approved
-            'status' => 'pending_approval', // Needs admin approval
-            'enrollment_count' => 0,
-            'rating' => 0,
-            'content' => ''
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Tutorial created successfully. Waiting for admin approval.',
-            'tutorial' => $tutorial
-        ], 201);
-
-    } catch (\Exception $e) {
-        Log::error('Create tutorial error: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Failed to create tutorial',
-            'error' => $e->getMessage()
-        ], 500);
-    }
-}
 
     // Add these methods to TutorController
 public function publishTutorial(Tutorial $tutorial)
@@ -880,71 +1079,6 @@ public function getStudentAttendance($studentId)
     }
 }
 
-// In TutorController.php
-
-/**
- * Get assignments for current tutor
- */
-public function getAssignments(Request $request)
-{
-    $user = Auth::user();
-    
-    $assignments = TutorialAssignment::with(['tutorial', 'tutorial.category', 'assignedBy'])
-        ->where('tutor_id', $user->id)
-        ->orderBy('created_at', 'desc')
-        ->get();
-    
-    return response()->json([
-        'success' => true,
-        'assignments' => $assignments
-    ]);
-}
-
-public function acceptAssignment(Request $request, $assignmentId)
-{
-    $user = Auth::user();
-    
-    $assignment = TutorialAssignment::where('id', $assignmentId)
-        ->where('tutor_id', $user->id)
-        ->where('status', 'pending')  // ← MUST BE PENDING
-        ->firstOrFail();
-    
-    $assignment->accept();
-    
-    // ✅ FIX: Update tutorial status to 'in_progress'
-    $assignment->tutorial->update([
-        'status' => 'in_progress', // NOT 'approved'
-        'tutor_id' => $user->id
-    ]);
-    
-    return response()->json([
-        'success' => true,
-        'message' => 'Assignment accepted successfully',
-        'assignment' => $assignment->load(['tutorial', 'assignedBy'])
-    ]);
-}
-
-/**
- * Reject an assignment
- */
-public function rejectAssignment(Request $request, $assignmentId)
-{
-    $user = Auth::user();
-    
-    $assignment = TutorialAssignment::where('id', $assignmentId)
-        ->where('tutor_id', $user->id)
-        ->where('status', 'pending')
-        ->firstOrFail();
-    
-    $assignment->reject($request->reason);
-    
-    return response()->json([
-        'success' => true,
-        'message' => 'Assignment rejected',
-        'assignment' => $assignment
-    ]);
-}
-
 /**
  * Get assigned tutorials (accepted assignments)
  */
@@ -1067,5 +1201,1167 @@ public function markAsCompleted(Request $request, $tutorialId)
         'message' => 'Tutorial marked as completed',
         'tutorial' => $tutorial
     ]);
+}
+
+// In TutorController.php - MODIFIED METHODS
+
+/**
+ * Get all assignments and classes for current tutor
+ * Returns: Individual assignments + Classes grouped by status
+ */
+public function getAssignments(Request $request)
+{
+    try {
+        $user = Auth::user();
+        
+        // Get individual assignments
+        $individualAssignments = DB::table('student_tutor_assignments as sta')
+            ->select(
+                'sta.id',
+                DB::raw("'individual' as type"),
+                'sta.status',
+                'sta.tutor_status',
+                'sta.weekly_hours',
+                'sta.start_date',
+                'sta.end_date',
+                'sta.tutor_responded_at',
+                'sta.rejection_reason',
+                'sta.created_at',
+                'sta.updated_at',
+                
+                // Student info
+                's.id as student_id',
+                's.name as student_name',
+                's.email as student_email',
+                's.profile_photo as student_avatar',
+                
+                // Course info
+                'c.id as course_id',
+                'c.title as course_title',
+                'c.description as course_description',
+                'c.duration_hours as course_duration'
+            )
+            ->join('users as s', 'sta.student_id', '=', 's.id')
+            ->join('courses as c', 'sta.course_id', '=', 'c.id')
+            ->where('sta.tutor_id', $user->id)
+            ->orderBy('sta.created_at', 'desc')
+            ->get();
+
+        // Get classes
+        $classes = DB::table('classes as cls')
+            ->select(
+                'cls.id',
+                DB::raw("'class' as type"),
+                'cls.status',
+                'cls.tutor_status',
+                'cls.title',
+                'cls.description',
+                'cls.batch_name',
+                'cls.enrollment_code',
+                'cls.current_enrollment',
+                'cls.max_capacity',
+                'cls.schedule',
+                'cls.start_date',
+                'cls.end_date',
+                'cls.price',
+                'cls.level',
+                'cls.tutor_responded_at',
+                'cls.rejection_reason',
+                'cls.created_at',
+                'cls.updated_at',
+                
+                // Course info
+                'c.id as course_id',
+                'c.title as course_title',
+                'c.description as course_description',
+                'c.duration_hours as course_duration'
+            )
+            ->join('courses as c', 'cls.course_id', '=', 'c.id')
+            ->where('cls.tutor_id', $user->id)
+            ->orderBy('cls.created_at', 'desc')
+            ->get();
+
+        // Group by status for frontend
+        $grouped = [
+            'pending' => [
+                'individual' => $individualAssignments->where('tutor_status', 'pending')->values(),
+                'classes' => $classes->where('tutor_status', 'pending')->values(),
+                'count' => $individualAssignments->where('tutor_status', 'pending')->count() + 
+                          $classes->where('tutor_status', 'pending')->count()
+            ],
+            'accepted' => [
+                'individual' => $individualAssignments->where('tutor_status', 'accepted')->values(),
+                'classes' => $classes->where('tutor_status', 'accepted')->values(),
+                'count' => $individualAssignments->where('tutor_status', 'accepted')->count() + 
+                          $classes->where('tutor_status', 'accepted')->count()
+            ],
+            'rejected' => [
+                'individual' => $individualAssignments->where('tutor_status', 'rejected')->values(),
+                'classes' => $classes->where('tutor_status', 'rejected')->values(),
+                'count' => $individualAssignments->where('tutor_status', 'rejected')->count() + 
+                          $classes->where('tutor_status', 'rejected')->count()
+            ]
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $grouped,
+            'stats' => [
+                'total_individual' => $individualAssignments->count(),
+                'total_classes' => $classes->count(),
+                'total_pending' => $grouped['pending']['count'],
+                'total_accepted' => $grouped['accepted']['count'],
+                'total_rejected' => $grouped['rejected']['count']
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Get assignments error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch assignments',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Accept an assignment or class
+ * Route: POST /tutor/assignments/{id}/accept?type=individual|class
+ */
+public function acceptAssignment(Request $request, $id)
+{
+    try {
+        $user = Auth::user();
+        $type = $request->query('type', 'individual');
+        
+        if ($type === 'individual') {
+            // Accept individual assignment
+            $updated = DB::table('student_tutor_assignments')
+                ->where('id', $id)
+                ->where('tutor_id', $user->id)
+                ->where('tutor_status', 'pending')
+                ->update([
+                    'tutor_status' => 'accepted',
+                    'tutor_responded_at' => now(),
+                    'status' => 'active',
+                    'updated_at' => now()
+                ]);
+                
+            $assignment = DB::table('student_tutor_assignments as sta')
+                ->join('users as s', 'sta.student_id', '=', 's.id')
+                ->join('courses as c', 'sta.course_id', '=', 'c.id')
+                ->where('sta.id', $id)
+                ->first(['sta.*', 's.name as student_name', 'c.title as course_title']);
+                
+            $itemType = 'assignment';
+            
+        } else if ($type === 'class') {
+            // Accept class
+            $updated = DB::table('classes')
+                ->where('id', $id)
+                ->where('tutor_id', $user->id)
+                ->where('tutor_status', 'pending')
+                ->update([
+                    'tutor_status' => 'accepted',
+                    'tutor_responded_at' => now(),
+                    'status' => 'upcoming',
+                    'updated_at' => now()
+                ]);
+                
+            $assignment = DB::table('classes as cls')
+                ->join('courses as c', 'cls.course_id', '=', 'c.id')
+                ->where('cls.id', $id)
+                ->first(['cls.*', 'c.title as course_title']);
+                
+            $itemType = 'class';
+        } else {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid type. Use individual or class'
+            ], 400);
+        }
+
+        if (!$updated) {
+            return response()->json([
+                'success' => false,
+                'message' => ucfirst($itemType) . ' not found or already processed'
+            ], 404);
+        }
+
+        // Send notification to admin
+        $this->sendAcceptanceNotification($user, $assignment, $itemType);
+
+        return response()->json([
+            'success' => true,
+            'message' => ucfirst($itemType) . ' accepted successfully',
+            'data' => $assignment
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Accept assignment error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to accept assignment',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Reject an assignment or class with reason
+ * Route: POST /tutor/assignments/{id}/reject?type=individual|class
+ */
+public function rejectAssignment(Request $request, $id)
+{
+    try {
+        $user = Auth::user();
+        $type = $request->query('type', 'individual');
+        $reason = $request->input('reason', '');
+        
+        if (empty($reason)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Rejection reason is required'
+            ], 422);
+        }
+
+        if ($type === 'individual') {
+            $updated = DB::table('student_tutor_assignments')
+                ->where('id', $id)
+                ->where('tutor_id', $user->id)
+                ->where('tutor_status', 'pending')
+                ->update([
+                    'tutor_status' => 'rejected',
+                    'tutor_responded_at' => now(),
+                    'rejection_reason' => $reason,
+                    'status' => 'cancelled',
+                    'updated_at' => now()
+                ]);
+                
+            $assignment = DB::table('student_tutor_assignments as sta')
+                ->join('users as s', 'sta.student_id', '=', 's.id')
+                ->join('courses as c', 'sta.course_id', '=', 'c.id')
+                ->where('sta.id', $id)
+                ->first(['sta.*', 's.name as student_name', 'c.title as course_title']);
+                
+            $itemType = 'assignment';
+            
+        } else if ($type === 'class') {
+            $updated = DB::table('classes')
+                ->where('id', $id)
+                ->where('tutor_id', $user->id)
+                ->where('tutor_status', 'pending')
+                ->update([
+                    'tutor_status' => 'rejected',
+                    'tutor_responded_at' => now(),
+                    'rejection_reason' => $reason,
+                    'status' => 'cancelled',
+                    'updated_at' => now()
+                ]);
+                
+            $assignment = DB::table('classes as cls')
+                ->join('courses as c', 'cls.course_id', '=', 'c.id')
+                ->where('cls.id', $id)
+                ->first(['cls.*', 'c.title as course_title']);
+                
+            $itemType = 'class';
+        } else {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid type. Use individual or class'
+            ], 400);
+        }
+
+        if (!$updated) {
+            return response()->json([
+                'success' => false,
+                'message' => ucfirst($itemType) . ' not found or already processed'
+            ], 404);
+        }
+
+        // Send notification to admin
+        $this->sendRejectionNotification($user, $assignment, $itemType, $reason);
+
+        return response()->json([
+            'success' => true,
+            'message' => ucfirst($itemType) . ' rejected successfully',
+            'data' => $assignment
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Reject assignment error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to reject assignment',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Send notification to admin when tutor accepts
+ */
+private function sendAcceptanceNotification($tutor, $assignment, $type)
+{
+    try {
+        $adminUsers = User::where('role', 'admin')->get();
+        
+        foreach ($adminUsers as $admin) {
+            DB::table('messages')->insert([
+                'sender_id' => $tutor->id,
+                'receiver_id' => $admin->id,
+                'message' => $type === 'assignment' 
+                    ? "I have accepted the assignment for {$assignment->course_title} with student {$assignment->student_name}."
+                    : "I have accepted the class assignment for {$assignment->course_title} ({$assignment->title}).",
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+    } catch (\Exception $e) {
+        Log::error('Send acceptance notification error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Send notification to admin when tutor rejects
+ */
+private function sendRejectionNotification($tutor, $assignment, $type, $reason)
+{
+    try {
+        $adminUsers = User::where('role', 'admin')->get();
+        
+        foreach ($adminUsers as $admin) {
+            DB::table('messages')->insert([
+                'sender_id' => $tutor->id,
+                'receiver_id' => $admin->id,
+                'message' => $type === 'assignment'
+                    ? "I have rejected the assignment for {$assignment->course_title} with student {$assignment->student_name}. Reason: {$reason}"
+                    : "I have rejected the class assignment for {$assignment->course_title} ({$assignment->title}). Reason: {$reason}",
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+    } catch (\Exception $e) {
+        Log::error('Send rejection notification error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * List all lessons for a specific tutorial
+ * GET /tutor/tutorials/{tutorialId}/lessons
+ */
+public function getLessons($tutorialId)
+{
+    try {
+        $user = Auth::user();
+        
+        // Find tutorial owned by this tutor
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+
+        $lessons = $tutorial->lessons()
+            ->orderBy('order')
+            ->with('materials') // if you add materials table later
+            ->get()
+            ->map(function ($lesson) {
+                return [
+                    'id'           => $lesson->id,
+                    'title'        => $lesson->title,
+                    'description'  => $lesson->description,
+                    'duration'     => $lesson->duration,
+                    'order'        => $lesson->order,
+                    'video_url'    => $lesson->video_url,
+                    'content'      => $lesson->content, // rich text/markdown
+                    'is_preview'   => $lesson->is_preview,
+                    'is_locked'    => $lesson->is_locked,
+                    'materials'    => $lesson->materials->map(fn($m) => [
+                        'id'           => $m->id,
+                        'original_name'=> $m->original_name,
+                        'url'          => Storage::url($m->file_path),
+                        'mime_type'    => $m->mime_type,
+                        'size_kb'      => $m->size_kb,
+                    ]) ?? [],
+                    'created_at'   => $lesson->created_at,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'lessons' => $lessons,
+            'tutorial' => [
+                'id'    => $tutorial->id,
+                'title' => $tutorial->title,
+                'status'=> $tutorial->status,
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Get lessons error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch lessons',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Create a new lesson
+ * POST /tutor/tutorials/{tutorialId}/lessons
+ */
+public function createLesson(Request $request, $tutorialId)
+{
+    try {
+        $user = Auth::user();
+        
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+
+        // Allow creation only if tutorial is editable
+        if (!in_array($tutorial->status, ['draft', 'rejected', 'approved', 'in_progress'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot add lessons to this tutorial status'
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'title'       => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'duration'    => 'required|string|max:100', // e.g. "45 min"
+            'order'       => 'required|integer|min:1',
+            'video_url'   => 'nullable|url',
+            'content'     => 'nullable|string', // markdown or rich text
+            'is_preview'  => 'boolean',
+            'is_locked'   => 'boolean',
+            'materials.*' => 'nullable|file|mimes:pdf,doc,docx,txt,zip|max:15360', // 15MB max
+        ]);
+
+        $lesson = $tutorial->lessons()->create($validated);
+
+        // Handle multiple file uploads
+        if ($request->hasFile('materials')) {
+            foreach ($request->file('materials') as $file) {
+                $path = $file->store('lessons/' . $lesson->id, 'public');
+                
+                $lesson->materials()->create([
+                    'file_path'     => $path,
+                    'original_name' => $file->getClientOriginalName(),
+                    'mime_type'     => $file->getMimeType(),
+                    'size_kb'       => round($file->getSize() / 1024, 2),
+                ]);
+            }
+        }
+
+        $lesson->load('materials');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lesson created successfully',
+            'lesson'  => [
+                'id'           => $lesson->id,
+                'title'        => $lesson->title,
+                'description'  => $lesson->description,
+                'duration'     => $lesson->duration,
+                'order'        => $lesson->order,
+                'video_url'    => $lesson->video_url,
+                'content'      => $lesson->content,
+                'is_preview'   => $lesson->is_preview,
+                'is_locked'    => $lesson->is_locked,
+                'materials'    => $lesson->materials->map(fn($m) => [
+                    'id'           => $m->id,
+                    'original_name'=> $m->original_name,
+                    'url'          => Storage::url($m->file_path),
+                ]),
+            ]
+        ], 201);
+
+    } catch (\Exception $e) {
+        Log::error('Create lesson error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to create lesson',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Update a lesson
+ * PUT /tutor/tutorials/{tutorialId}/lessons/{lessonId}
+ */
+public function updateLesson(Request $request, $tutorialId, $lessonId)
+{
+    try {
+        $user = Auth::user();
+
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+
+        $lesson = $tutorial->lessons()->findOrFail($lessonId);
+
+        Log::info('Update lesson request received', [
+            'tutorial_id' => $tutorialId,
+            'lesson_id'   => $lessonId,
+            'input'       => $request->all(),
+            'files'       => $request->hasFile('materials') ? count($request->file('materials')) : 0,
+        ]);
+
+        $validated = $request->validate([
+            'title'       => 'sometimes|required|string|max:255',
+            'description' => 'nullable|string',
+            'duration'    => 'sometimes|string|max:100',
+            'order'       => 'sometimes|integer|min:1',
+            'video_url'   => 'nullable|url',
+            'content'     => 'nullable|string',
+            'is_preview'  => 'sometimes|boolean',
+            'is_locked'   => 'sometimes|boolean',
+            'materials.*' => 'nullable|file|mimes:pdf,doc,docx,txt,zip|max:15360',
+        ]);
+
+        // Update only the fields that were sent
+        $updateData = array_filter($validated, fn($v) => !is_null($v) && $v !== '');
+
+        // Special handling for booleans (they come as "1"/"0" or true/false)
+        if (array_key_exists('is_preview', $request->all())) {
+            $updateData['is_preview'] = $request->boolean('is_preview');
+        }
+        if (array_key_exists('is_locked', $request->all())) {
+            $updateData['is_locked'] = $request->boolean('is_locked');
+        }
+
+        $lesson->update($updateData);
+
+        // Handle new materials (append only)
+        if ($request->hasFile('materials')) {
+            foreach ($request->file('materials') as $file) {
+                $path = $file->store('lessons/' . $lesson->id, 'public');
+                $lesson->materials()->create([
+                    'file_path'     => $path,
+                    'original_name' => $file->getClientOriginalName(),
+                    'mime_type'     => $file->getMimeType(),
+                    'size_kb'       => round($file->getSize() / 1024, 2),
+                ]);
+            }
+        }
+
+        $lesson->load('materials');
+
+        Log::info('Lesson updated successfully', ['lesson_id' => $lesson->id]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lesson updated successfully',
+            'lesson'  => $lesson
+        ]);
+
+    } catch (\Illuminate\Validation\ValidationException $e) {
+        Log::warning('Validation failed on lesson update', $e->errors());
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors'  => $e->errors()
+        ], 422);
+    } catch (\Exception $e) {
+        Log::error('Lesson update failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to update lesson',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Delete a lesson
+ * DELETE /tutor/tutorials/{tutorialId}/lessons/{lessonId}
+ */
+public function deleteLesson($tutorialId, $lessonId)
+{
+    try {
+        $user = Auth::user();
+        
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+
+        $lesson = $tutorial->lessons()->findOrFail($lessonId);
+
+        // Delete associated files from storage
+        foreach ($lesson->materials as $material) {
+            if (Storage::disk('public')->exists($material->file_path)) {
+                Storage::disk('public')->delete($material->file_path);
+            }
+            $material->delete();
+        }
+
+        $lesson->delete();
+
+        // Reorder remaining lessons
+        $remaining = $tutorial->lessons()->orderBy('order')->get();
+        foreach ($remaining as $index => $l) {
+            $l->update(['order' => $index + 1]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lesson deleted successfully'
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('Delete lesson error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to delete lesson',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get all live sessions for tutor
+ * GET /tutor/live-sessions
+ */
+public function getLiveSessions(Request $request)
+{
+    try {
+        $user = Auth::user();
+        
+        $status = $request->query('status');
+        $tutorialId = $request->query('tutorial_id');
+        
+        $query = LiveSession::with(['tutorial', 'course'])
+            ->where('tutor_id', $user->id)
+            ->orderBy('start_time', 'desc');
+            
+        if ($status) {
+            $query->where('status', $status);
+        }
+        
+        if ($tutorialId) {
+            $query->where('tutorial_id', $tutorialId);
+        }
+        
+        $sessions = $query->get();
+        
+        return response()->json([
+            'success' => true,
+            'sessions' => $sessions,
+            'stats' => [
+                'total' => $sessions->count(),
+                'scheduled' => $sessions->where('status', 'scheduled')->count(),
+                'live' => $sessions->where('status', 'live')->count(),
+                'ended' => $sessions->where('status', 'ended')->count(),
+                'cancelled' => $sessions->where('status', 'cancelled')->count(),
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get live sessions error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch live sessions',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get live sessions for a specific tutorial
+ * GET /tutor/tutorials/{tutorialId}/live-sessions
+ */
+public function getTutorialLiveSessions($tutorialId)
+{
+    try {
+        $user = Auth::user();
+        
+        $tutorial = Tutorial::where('id', $tutorialId)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+        
+        $sessions = LiveSession::where('tutorial_id', $tutorialId)
+            ->orderBy('start_time', 'desc')
+            ->get();
+            
+        return response()->json([
+            'success' => true,
+            'sessions' => $sessions,
+            'tutorial' => [
+                'id' => $tutorial->id,
+                'title' => $tutorial->title,
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get tutorial live sessions error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch live sessions for tutorial',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Create a new live session
+ * POST /tutor/live-sessions
+ */
+public function createLiveSession(Request $request)
+{
+    try {
+        $user = Auth::user();
+        
+        $validated = $request->validate([
+            'tutorial_id' => 'required|exists:tutorials,id',
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'start_time' => 'required|date|after_or_equal:now',
+            'duration_minutes' => 'required|integer|min:15|max:240',
+            'max_participants' => 'nullable|integer|min:1|max:100',
+            'lesson_id' => 'nullable|exists:lessons,id',
+            'course_id' => 'nullable|exists:courses,id',
+        ]);
+        
+        // Verify tutorial belongs to this tutor
+        $tutorial = Tutorial::where('id', $validated['tutorial_id'])
+            ->where('tutor_id', $user->id)
+            ->first();
+            
+        if (!$tutorial) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tutorial not found or unauthorized'
+            ], 403);
+        }
+        
+        // Generate unique Jitsi room name
+        $roomName = 'tut-' . $tutorial->id . '-' . Str::random(8) . '-' . time();
+        $jitsiDomain = config('services.jitsi.domain', 'meet.jit.si');
+        $meetingUrl = "https://{$jitsiDomain}/{$roomName}";
+        
+        // Create the live session
+        $liveSession = LiveSession::create([
+            'tutor_id' => $user->id,
+            'tutorial_id' => $validated['tutorial_id'],
+            'course_id' => $validated['course_id'] ?? $tutorial->course_id,
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'start_time' => $validated['start_time'],
+            'duration_minutes' => $validated['duration_minutes'],
+            'jitsi_room_name' => $roomName,
+            'meeting_url' => $meetingUrl,
+            'max_participants' => $validated['max_participants'] ?? 50,
+            'lesson_id' => $validated['lesson_id'] ?? null,
+            'status' => 'scheduled',
+        ]);
+        
+        // Load relationships for response
+        $liveSession->load(['tutorial', 'course']);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session created successfully',
+            'session' => $liveSession
+        ], 201);
+        
+    } catch (\Exception $e) {
+        Log::error('Create live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to create live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Update a live session
+ * PUT /tutor/live-sessions/{id}
+ */
+public function updateLiveSession(Request $request, $id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Only allow updates for scheduled sessions
+        if ($liveSession->status !== 'scheduled') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot update a session that is already live or ended'
+            ], 422);
+        }
+        
+        $validated = $request->validate([
+            'title' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'start_time' => 'sometimes|date|after_or_equal:now',
+            'duration_minutes' => 'sometimes|integer|min:15|max:240',
+            'max_participants' => 'nullable|integer|min:1|max:100',
+            'lesson_id' => 'nullable|exists:lessons,id',
+        ]);
+        
+        // Update the session
+        $liveSession->update($validated);
+        $liveSession->load(['tutorial', 'course']);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session updated successfully',
+            'session' => $liveSession
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Update live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to update live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Start a live session (change status to live)
+ * POST /tutor/live-sessions/{id}/start
+ */
+public function startLiveSession($id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Check if session is scheduled
+        if ($liveSession->status !== 'scheduled') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only scheduled sessions can be started'
+            ], 422);
+        }
+        
+        // Check if start time is within reasonable window (e.g., 30 minutes before to 1 hour after)
+        $now = Carbon::now();
+        $startTime = Carbon::parse($liveSession->start_time);
+        
+        if ($now->diffInMinutes($startTime, false) > 30) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot start session more than 30 minutes before scheduled time'
+            ], 422);
+        }
+        
+        // Update status to live
+        $liveSession->update([
+            'status' => 'live',
+            'actual_start_time' => $now,
+        ]);
+        
+        // Notify enrolled students (you can implement this)
+        $this->notifyStudentsAboutLiveSession($liveSession);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session started successfully',
+            'session' => $liveSession->load(['tutorial', 'course'])
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Start live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to start live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * End a live session
+ * POST /tutor/live-sessions/{id}/end
+ */
+public function endLiveSession(Request $request, $id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Check if session is live
+        if ($liveSession->status !== 'live') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only live sessions can be ended'
+            ], 422);
+        }
+        
+        $validated = $request->validate([
+            'recording_url' => 'nullable|url',
+            'notes' => 'nullable|string',
+        ]);
+        
+        $now = Carbon::now();
+        
+        // Update session
+        $liveSession->update([
+            'status' => 'ended',
+            'actual_end_time' => $now,
+            'recording_url' => $validated['recording_url'] ?? null,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session ended successfully',
+            'session' => $liveSession->load(['tutorial', 'course'])
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('End live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to end live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Cancel a scheduled live session
+ * POST /tutor/live-sessions/{id}/cancel
+ */
+public function cancelLiveSession(Request $request, $id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Only allow cancelling scheduled sessions
+        if ($liveSession->status !== 'scheduled') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only scheduled sessions can be cancelled'
+            ], 422);
+        }
+        
+        $validated = $request->validate([
+            'cancellation_reason' => 'required|string|max:500',
+        ]);
+        
+        $liveSession->update([
+            'status' => 'cancelled',
+            'cancellation_reason' => $validated['cancellation_reason'],
+            'cancelled_at' => Carbon::now(),
+        ]);
+        
+        // Notify students about cancellation
+        $this->notifyStudentsAboutCancellation($liveSession, $validated['cancellation_reason']);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session cancelled successfully',
+            'session' => $liveSession
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Cancel live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to cancel live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Delete a live session (only if cancelled or ended)
+ * DELETE /tutor/live-sessions/{id}
+ */
+public function deleteLiveSession($id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Only allow deleting cancelled or ended sessions
+        if (!in_array($liveSession->status, ['cancelled', 'ended'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only cancelled or ended sessions can be deleted'
+            ], 422);
+        }
+        
+        $liveSession->delete();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Live session deleted successfully'
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Delete live session error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to delete live session',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get live session details with participants
+ * GET /tutor/live-sessions/{id}/details
+ */
+public function getLiveSessionDetails($id)
+{
+    try {
+        $user = Auth::user();
+        
+        $liveSession = LiveSession::with(['tutorial', 'course'])
+            ->where('id', $id)
+            ->where('tutor_id', $user->id)
+            ->firstOrFail();
+            
+        // Get enrolled students for this tutorial
+        $enrolledStudents = Enrollment::where('tutorial_id', $liveSession->tutorial_id)
+            ->with('user')
+            ->get()
+            ->map(function($enrollment) {
+                return [
+                    'id' => $enrollment->user_id,
+                    'name' => $enrollment->user->name,
+                    'email' => $enrollment->user->email,
+                    'profile_photo' => $enrollment->user->profile_photo,
+                ];
+            });
+            
+        return response()->json([
+            'success' => true,
+            'session' => $liveSession,
+            'enrolled_students' => $enrolledStudents,
+            'total_participants' => $enrolledStudents->count(),
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get live session details error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch live session details',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Get upcoming live sessions (dashboard widget)
+ * GET /tutor/live-sessions/upcoming
+ */
+public function getUpcomingLiveSessions(Request $request)
+{
+    try {
+        $user = Auth::user();
+        
+        $limit = $request->query('limit', 5);
+        
+        $upcomingSessions = LiveSession::with(['tutorial', 'course'])
+            ->where('tutor_id', $user->id)
+            ->where('status', 'scheduled')
+            ->where('start_time', '>=', now())
+            ->orderBy('start_time', 'asc')
+            ->limit($limit)
+            ->get();
+            
+        return response()->json([
+            'success' => true,
+            'sessions' => $upcomingSessions,
+            'count' => $upcomingSessions->count()
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get upcoming live sessions error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch upcoming live sessions',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+// Helper methods for notifications
+private function notifyStudentsAboutLiveSession(LiveSession $session)
+{
+    try {
+        // Get all enrolled students for this tutorial
+        $enrollments = Enrollment::where('tutorial_id', $session->tutorial_id)
+            ->with('user')
+            ->get();
+            
+        foreach ($enrollments as $enrollment) {
+            // Create notification for each student
+            \App\Models\Notification::create([
+                'user_id' => $enrollment->user_id,
+                'type' => 'live_session_started',
+                'title' => 'Live Session Started',
+                'message' => "Live session '{$session->title}' has started. Join now!",
+                'data' => json_encode([
+                    'session_id' => $session->id,
+                    'tutorial_id' => $session->tutorial_id,
+                    'meeting_url' => $session->meeting_url,
+                    'title' => $session->title,
+                ]),
+                'read_at' => null,
+            ]);
+            
+            // You could also send email or push notification here
+        }
+        
+    } catch (\Exception $e) {
+        Log::error('Notify students about live session error: ' . $e->getMessage());
+    }
+}
+
+private function notifyStudentsAboutCancellation(LiveSession $session, $reason)
+{
+    try {
+        $enrollments = Enrollment::where('tutorial_id', $session->tutorial_id)
+            ->with('user')
+            ->get();
+            
+        foreach ($enrollments as $enrollment) {
+            \App\Models\Notification::create([
+                'user_id' => $enrollment->user_id,
+                'type' => 'live_session_cancelled',
+                'title' => 'Live Session Cancelled',
+                'message' => "Live session '{$session->title}' has been cancelled. Reason: {$reason}",
+                'data' => json_encode([
+                    'session_id' => $session->id,
+                    'tutorial_id' => $session->tutorial_id,
+                    'title' => $session->title,
+                    'reason' => $reason,
+                ]),
+                'read_at' => null,
+            ]);
+        }
+        
+    } catch (\Exception $e) {
+        Log::error('Notify students about cancellation error: ' . $e->getMessage());
+    }
 }
 }

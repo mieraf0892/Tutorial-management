@@ -6,8 +6,15 @@ import hero1 from "@/assets/hero-1.jpg";
 import hero2 from "@/assets/hero-2.jpg";
 import hero3 from "@/assets/hero-3.jpg";
 import hero4 from "@/assets/hero-4.jpg";
+import { apiClient } from "@/lib/api";
 
 // Types
+interface HomepageStats {
+  total_students: number;
+  total_courses: number;
+  total_tutorials: number;
+}
+
 interface HeroSlideStats {
   students: string;
   tutorials: string;
@@ -22,7 +29,6 @@ interface HeroSlide {
   highlight: string;
   subtitle: string;
   description: string;
-  stats: HeroSlideStats;
 }
 
 type Direction = -1 | 0 | 1;
@@ -70,7 +76,6 @@ const heroSlides: HeroSlide[] = [
     highlight: "Web Apps",
     subtitle: "From Scratch",
     description: "Learn HTML, CSS, JavaScript, React, and more with hands-on projects and expert guidance.",
-    stats: { students: "50K+", tutorials: "200+", rating: "4.9★" }
   },
   {
     id: 2,
@@ -80,7 +85,6 @@ const heroSlides: HeroSlide[] = [
     highlight: "UI/UX",
     subtitle: "Designs",
     description: "Master Figma, design systems, and user experience principles to create beautiful interfaces.",
-    stats: { students: "35K+", tutorials: "150+", rating: "4.8★" }
   },
   {
     id: 3,
@@ -90,7 +94,6 @@ const heroSlides: HeroSlide[] = [
     highlight: "Data Analytics",
     subtitle: "",
     description: "Transform raw data into actionable insights with Python, SQL, and visualization tools.",
-    stats: { students: "28K+", tutorials: "180+", rating: "4.9★" }
   },
   {
     id: 4,
@@ -100,7 +103,6 @@ const heroSlides: HeroSlide[] = [
     highlight: "Mobile Apps",
     subtitle: "That Shine",
     description: "Create cross-platform mobile applications with React Native and Flutter.",
-    stats: { students: "42K+", tutorials: "220+", rating: "4.7★" }
   },
 ];
 
@@ -198,6 +200,37 @@ const HeroSection = () => {
   const [direction, setDirection] = useState<Direction>(0);
   const [isPaused, setIsPaused] = useState(false);
   const [imageError, setImageError] = useState<number | null>(null);
+  const [stats, setStats] = useState<HomepageStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+
+  // Fetch homepage stats
+  useEffect(() => {
+    const fetchHomepageStats = async () => {
+      try {
+        setStatsLoading(true);
+        setStatsError(null);
+        
+        const response = await apiClient.get<{
+          success: boolean;
+          data: HomepageStats;
+          message?: string;
+        }>('/homepage-stats');
+        
+        if (response.data.success) {
+          setStats(response.data.data);
+        } else {
+          console.error('Failed to load statistics:', response.data.message);
+        }
+      } catch (error) {
+        console.error('Error fetching homepage stats:', error);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchHomepageStats();
+  }, []);
 
   // Preload images
   useEffect(() => {
@@ -260,7 +293,25 @@ const HeroSection = () => {
     setImageError(null);
   }, []);
 
+  // Format stats for display
+  const formatStats = (): HeroSlideStats => {
+    if (!stats) {
+      return {
+        students: "50K+",
+        tutorials: "200+",
+        rating: "4.9★"
+      };
+    }
+
+    return {
+      students: `${Math.floor(stats.total_students / 1000)}K+`,
+      tutorials: `${stats.total_tutorials}+`,
+      rating: "4.9★" // You can make this dynamic if you have rating data
+    };
+  };
+
   const currentSlideData = heroSlides[currentSlide];
+  const displayStats = formatStats();
 
   return (
     <section 
@@ -356,13 +407,13 @@ const HeroSection = () => {
 
               <div className="flex flex-wrap items-center gap-6 md:gap-8 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-foreground">{currentSlideData.stats.students}</span> Students
+                  <span className="font-semibold text-foreground">{displayStats.students}</span> Students
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-foreground">{currentSlideData.stats.tutorials}</span> Tutorials
+                  <span className="font-semibold text-foreground">{displayStats.tutorials}</span> Tutorials
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-foreground">{currentSlideData.stats.rating}</span> Rating
+                  <span className="font-semibold text-foreground">{displayStats.rating}</span> Rating
                 </div>
               </div>
             </motion.div>

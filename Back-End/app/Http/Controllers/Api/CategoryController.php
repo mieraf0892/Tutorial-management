@@ -46,4 +46,32 @@ class CategoryController extends Controller
             ], 404);
         }
     }
+
+    /**
+ * Get categories tree for admin course creation (only subcategories with full path)
+ */
+public function adminTree()
+{
+    $subcategories = Category::where('level', 1)
+        ->where('is_active', true)
+        ->with('parent')
+        ->orderBy('name')
+        ->get()
+        ->map(function ($cat) {
+            return [
+                'id'         => $cat->id,
+                'name'       => $cat->name,
+                'full_path'  => $cat->full_path,        // e.g. "Programming > AI"
+                'parent_id'  => $cat->parent_id,
+                'parent_name'=> $cat->parent?->name,
+                'slug'       => $cat->slug,
+            ];
+        });
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Subcategories for course creation',
+        'subcategories' => $subcategories
+    ]);
+}
 }
